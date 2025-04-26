@@ -1,0 +1,93 @@
+version: "3.8"
+
+networks:
+  cassandra:
+    driver: bridge
+
+services:
+  server:
+    container_name: api_server
+    image: ${IMAGE_REPO}:${IMAGE_TAG}
+    build:
+      context: ../../.
+      dockerfile: ./deployment/docker/Dockerfile
+
+    ports:
+      - "8080:8080"
+    volumes:
+      - ".:/app"
+    depends_on:
+      - cassandra
+      - initialize
+      - insert
+    env_file:
+      - ../../.env
+    networks:
+      - cassandra
+
+  cassandra:
+    container_name: cassandra
+    image: cassandra:latest
+    restart: always
+    hostname: cassandra
+    ports:
+      - "9042:9042"
+    networks:
+      - cassandra
+
+  singerservice:
+    container_name: signerservice
+    image: node-654e3bca7fbeeed18f81d7c7.ps-xaas.io/tsa/signer:ocm-wstack
+    restart: always
+    environment:
+      ENGINE_PATH: /opt/plugins/hashicorp-vault-provider.so 
+      VAULT_ADRESS: http://host.docker.internal:8200 
+      VAULT_TOKEN: test
+      NATS_HOST: host.docker.internal:4222 
+      NATS_TOPIC: signer.service 
+      CLOUDEVENTPROVIDER_MESSAGING_PROTOCOL: nats 
+      CLOUDEVENTPROVIDER_MESSAGING_NATS_URL: host.docker.internal:4222 
+      CLOUDEVENTPROVIDER_MESSAGING_NATS_SUBJECT: signer.service
+    ports:
+      - "9000:8080"
+    networks:
+      - cassandra
+
+  vault:
+     container_name: $PROJECT_NAME-vault
+     image: hashicorp/vault:latest
+     restart: always
+     hostname: cassandra
+     ports:
+       - "8200:8200"
+     networks:
+       - cassandra
+
+  initialize:
+    container_name: initialize
+    image: nuvo/docker-cqlsh
+    command: cqlsh -f /cql/initialize.cql --cqlversion="3.4.6"
+    networks:
+      - cassandra
+    depends_on:
+      - cassandra
+    environment:
+      CQLSH_PORT: 9042
+      CQLVERSION: 3.4.6
+    volumes:
+      - "../../cql/initialize.cql:/cql/initialize.cql"
+
+  insert:
+    container_name: insert
+    image: nuvo/docker-cqlsh
+    command: cqlsh -f /cql/insert.cql --cqlversion="3.4.6"
+    networks:
+      - cassandra
+    depends_on:
+      - cassandra
+      - initialize
+    environment:
+      CQLSH_PORT: 9042
+      CQLVERSION: 3.4.6
+    volumes:
+      - "../../cql/insert.cql:/cql/insert.cql"

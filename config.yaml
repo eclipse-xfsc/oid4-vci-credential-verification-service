@@ -1,0 +1,28 @@
+servingPort: 8070
+cassandraHosts: 127.0.0.1:9042
+cassandraUser: cassandra
+cassandraPassword: change me
+profiles: DEBUG
+country: DE
+region: EU
+signingKey: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1FRUNBUUF3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRUp6QWxBZ0VCQkNCNDVQQlk0aVBOY0lwTVd6emYKei9uYXdxbmxIYlhTeFdjNUJWK1hyMzB5dkE9PQotLS0tLUVORCBFQyBQUklWQVRFIEtFWS0tLS0t
+externalPresentation:
+  enabled: true
+  authorizeEndpoint: http://localhost:8080
+  requestObjectPolicy: 
+  clientIdPolicy:
+signerService:
+  presentationVerifyUrl: http://localhost:9000/v1/presentation/verify
+  presentationSignUrl: http://localhost:9000/v1/presentation/proof
+topics:
+  authorization: presentation.authorisation
+  authorizationReply: presentation.authorisation.reply
+  proofNotify: presentation.proof.notify
+  presentationRequest: request
+  storageRequest: storage
+messaging:
+  protocol: nats
+  nats:
+    url: http://localhost:4222
+    queueGroup: credential-verification-service #optional
+    timeoutInSec: 10 #optional
