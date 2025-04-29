@@ -18,7 +18,7 @@ require (
 	gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core v1.0.3
 	gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip v1.3.8
 	gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging v1.10.0
-	gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/storage-service v0.0.82-0.20240222231449-213b1a61c0d8
+	gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/storage-service v0.9.0
 	gitlab.eclipse.org/eclipse/xfsc/tsa/signer v1.1.4
 )
 
