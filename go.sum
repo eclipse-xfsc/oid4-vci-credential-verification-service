@@ -250,8 +250,8 @@ gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/did-core v1.0.0 h1:6Pc+R4TZSgvz/Ls
 gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/did-core v1.0.0/go.mod h1:vTI93dopctfVILH9P6li08G/fHo8ddHIn1r5Q1MFd58=
 gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip v1.3.8 h1:Hwm4d3DL2UwEWn1xbj2gkcecNXULX8NmgvzN7Csi8kw=
 gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip v1.3.8/go.mod h1:zEswN6WqrvXbxgiKmP9nY+TyTsGLuun/ED41QbMFFp8=
-gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging v1.10.0 h1:v+f13ZgLkJNIeRc1gcePzBgwkV6UAq0lbqC7jF8kLkM=
-gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging v1.10.0/go.mod h1:6Vy3010QU4RJvEOwxF+idncvK4kWVVQaetAfqx6D7ek=
+gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging v1.12.0 h1:FQLozgN87j5rd0iP+ALsyzGlmv966tT/krK1mhzkzBY=
+gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging v1.12.0/go.mod h1:ZMzh/UFpH2sLHPMTM/3FlNDg3BLWYkoB6TCq+wb4BTY=
 gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/storage-service v0.0.82-0.20240222231449-213b1a61c0d8 h1:RFl/qY6avWN1rRdv9VMKAcsLHLPZumPBoDyYcVo00K4=
 gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/storage-service v0.0.82-0.20240222231449-213b1a61c0d8/go.mod h1:d1sezQcFShsIxmWHPf5yxc63ueF7DWVzkqL1Jdv7Nhg=
 gitlab.eclipse.org/eclipse/xfsc/tsa/signer v1.1.4 h1:rhIXWeOCaC0pF/LW932Zv4blpMvCykp7eJKgUFyz1Jc=
