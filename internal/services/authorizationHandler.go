@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/cloudevents/sdk-go/v2/event"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
+	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
 	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/types"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
-	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
 	"gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
 )
 
@@ -91,7 +91,14 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 		return "", errors.Join(errors.New("error during signing"), err)
 	}
 
-	err = serviceCommon.StoreRequest(ctx, requestId, tenantId, id, object)
+	groupId := ""
+	if headers, ok := ctx.Value(HeaderContextKey).(http.Header); ok {
+		groupId = headers.Get("x-groupId")
+		if groupId == "" {
+			groupId = headers.Get("x-group")
+		}
+	}
+	err = serviceCommon.StoreRequest(ctx, requestId, tenantId, groupId, object)
 
 	if err != nil {
 		return "", err

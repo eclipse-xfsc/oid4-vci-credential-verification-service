@@ -1,15 +1,15 @@
 package common
 
 import (
-	"github.com/gocql/gocql"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/docs"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	ginSwagger "github.com/swaggo/gin-swagger"
 	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/docs"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 )
 
 type Environment struct {
-	session         *gocql.Session
+	session         connection.SessionInterface
 	mode            string
 	cryptoNamespace string
 	logger          logr.Logger
@@ -49,11 +49,11 @@ func GetEnvironment() *Environment {
 	return env
 }
 
-func (e *Environment) SetSession(session *gocql.Session) {
+func (e *Environment) SetSession(session connection.SessionInterface) {
 	e.session = session
 }
 
-func (e *Environment) GetSession() *gocql.Session {
+func (e *Environment) GetSession() connection.SessionInterface {
 	return e.session
 }
 
@@ -63,6 +63,13 @@ func (e *Environment) GetRegion() string {
 
 func (e *Environment) GetCountry() string {
 	return e.config.Country
+}
+
+func (e *Environment) GetAccountPartition(account string) string {
+	if len(account) < AccountPartitionLength {
+		return account
+	}
+	return account[0:AccountPartitionLength]
 }
 
 func (e *Environment) SetCryptoNamespace(namespace string) {

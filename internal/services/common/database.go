@@ -9,294 +9,169 @@ import (
 	"fmt"
 	"time"
 
+	appCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/gocql/gocql"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 )
 
-func getEntriesFromDb(ctx context.Context, tenantId string, id string, searchField string) ([]model.VerificationEntry, error) {
-	env := common.GetEnvironment()
-	session := env.GetSession()
-	var dregion string
-	var dcountry string
-	var did string
-	var drId string
-	var ddefinition string
-	var dpresentation string
-	var dredirectUri string
-	var dstate string
-	var dlastUpdateTimeStamp time.Time
-	var dnonce string
-	var dresponseUri string
-	var dresponseMode string
-	var dresponseType string
-	var dclientId string
-	var dgroupId string
+const presentationsTable = "ocm.presentations"
 
-	queryString := fmt.Sprintf(`SELECT region,country,id,requestid,presentationdefinition,presentation,redirecturi,state,last_update_timestamp,nonce,responseuri,responsemode,responsetype,clientid,groupid FROM %s.presentations WHERE region=? AND
-																																												country=? AND
-																																												%s=?;`, tenantId, searchField)
-
-	query := session.Query(queryString,
-		env.GetRegion(),
-		env.GetCountry(),
-		id).Consistency(gocql.LocalQuorum).Iter()
-
+func scanEntries(iter *gocql.Iter) ([]model.VerificationEntry, error) {
+	var partition, region, country, tenantId, groupId, requestId string
+	var definition, pres, redirectURI, status, nonce, responseURI, responseMode, responseType, clientID string
+	var lastUpdate time.Time
 	ret := make([]model.VerificationEntry, 0)
-
-	for query.Scan(
-		&dregion,
-		&dcountry,
-		&did,
-		&drId,
-		&ddefinition,
-		&dpresentation,
-		&dredirectUri,
-		&dstate,
-		&dlastUpdateTimeStamp,
-		&dnonce,
-		&dresponseUri,
-		&dresponseMode,
-		&dresponseType,
-		&dclientId,
-		&dgroupId) {
-
-		row := model.VerificationEntry{
-			Region:              dregion,
-			Country:             dcountry,
-			Id:                  did,
-			RequestId:           drId,
-			RedirectUri:         dredirectUri,
-			State:               dstate,
-			LastUpdateTimeStamp: dlastUpdateTimeStamp,
-			Nonce:               dnonce,
-			ResponseUri:         dresponseUri,
-			ResponseMode:        dresponseMode,
-			ResponseType:        dresponseType,
-			ClientId:            dclientId,
-			GroupId:             dgroupId,
-		}
-
-		bpresentatioDefinition, err := base64.RawStdEncoding.DecodeString(ddefinition)
-
+	for iter.Scan(&partition, &region, &country, &tenantId, &groupId, &requestId, &definition, &pres, &redirectURI, &status, &lastUpdate, &nonce, &responseURI, &responseMode, &responseType, &clientID) {
+		row := model.VerificationEntry{Partition: partition, Region: region, Country: country, TenantId: tenantId, GroupId: groupId, RequestId: requestId, RedirectUri: redirectURI, State: status, LastUpdateTimeStamp: lastUpdate, Nonce: nonce, ResponseUri: responseURI, ResponseMode: responseMode, ResponseType: responseType, ClientId: clientID}
+		b, err := base64.RawStdEncoding.DecodeString(definition)
 		if err != nil {
 			return nil, err
 		}
-
-		if len(bpresentatioDefinition) > 0 {
-			var pD presentation.PresentationDefinition
-
-			err = json.Unmarshal(bpresentatioDefinition, &pD)
-
-			if err != nil {
+		if len(b) > 0 {
+			if err = json.Unmarshal(b, &row.PresentationDefinition); err != nil {
 				return nil, err
 			}
-
-			row.PresentationDefinition = pD
-
 		}
-
-		bPresentation, err := base64.RawStdEncoding.DecodeString(dpresentation)
-
+		b, err = base64.RawStdEncoding.DecodeString(pres)
 		if err != nil {
 			return nil, err
 		}
-
-		if len(bPresentation) > 0 {
-
-			var p []interface{}
-
-			err = json.Unmarshal(bPresentation, &p)
-
-			if err != nil {
+		if len(b) > 0 {
+			if err = json.Unmarshal(b, &row.Presentation); err != nil {
 				return nil, err
 			}
-			row.Presentation = p
 		}
-
 		ret = append(ret, row)
 	}
-
-	if err := query.Close(); err != nil {
+	if err := iter.Close(); err != nil {
 		return nil, err
 	}
-
 	return ret, nil
 }
 
-func GetEntryFromDb(ctx context.Context, tenantId string, id string) (*model.VerificationEntry, error) {
-	rows, err := getEntriesFromDb(ctx, tenantId, id, "id")
-	if len(rows) > 0 {
-		return &rows[0], err
-	} else {
-		return nil, errors.Join(fmt.Errorf("no rows found for id %s", id), err)
+func getEntryByKey(ctx context.Context, tenantId, groupId, requestId string) (*model.VerificationEntry, error) {
+	env := appCommon.GetEnvironment()
+	if tenantId == "" || groupId == "" || requestId == "" {
+		return nil, errors.New("tenantId, groupId and requestId must not be empty")
 	}
+	partition := env.GetAccountPartition(groupId)
+	selectCols := `partition,region,country,tenantId,groupId,requestId,presentationDefinition,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId`
+	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`, selectCols, presentationsTable)
+	rows, err := scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("no row found for groupId %s requestId %s", groupId, requestId)
+	}
+	return &rows[0], nil
 }
 
-func GetEntryFromDbByRequestId(ctx context.Context, tenantId string, requestId string) (*model.VerificationEntry, error) {
-	rows, err := getEntriesFromDb(ctx, tenantId, requestId, "requestId")
-	if len(rows) > 0 {
-		return &rows[0], err
-	} else {
-		return nil, errors.Join(fmt.Errorf("no rows found for requestId %s", requestId), err)
+func GetEntryFromDb(ctx context.Context, tenantId, state string) (*model.VerificationEntry, error) {
+	key, err := DecodeVerificationState(state)
+	if err != nil {
+		return nil, err
 	}
+	return getEntryByKey(ctx, tenantId, key.GroupId, key.RequestId)
+}
+
+func GetEntryFromDbByRequestId(ctx context.Context, tenantId, requestId string) (*model.VerificationEntry, error) {
+	return nil, errors.New("requestId-only lookup is not supported; groupId is required (use verification state)")
+}
+
+func GetEntriesFromDb(ctx context.Context, tenantId, groupId string) ([]model.VerificationEntry, error) {
+	env := appCommon.GetEnvironment()
+	partition := env.GetAccountPartition(groupId)
+	selectCols := `partition,region,country,tenantId,groupId,requestId,presentationDefinition,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId`
+	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=?`, selectCols, presentationsTable)
+	return scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
 }
 
 type PresentationRequestOptions struct {
 	TenantId  string `json:"tenantId"`
-	Id        string `json:"id"`
 	RequestId string `json:"requestId"`
 	GroupId   string `json:"groupId"`
-	// in seconds
-	Ttl int `json:"ttl"`
+	Ttl       int    `json:"ttl"`
 }
 
-func AddPresentationDefinitonToDb(presentationDefinition presentation.PresentationDefinition, options PresentationRequestOptions, ctx context.Context) error {
-	env := common.GetEnvironment()
-	session := env.GetSession()
-
-	queryString := fmt.Sprintf(`INSERT INTO %s.presentations (region,country,id,presentationDefinition,state,last_update_timestamp,requestId,nonce, groupid) VALUES(?,?,?,?,?,toTimestamp(now()),?,?,?) USING TTL ?;`, options.TenantId)
-
-	pD, err := json.Marshal(presentationDefinition)
-
+func AddPresentationDefinitonToDb(pd presentation.PresentationDefinition, options PresentationRequestOptions, ctx context.Context) error {
+	if options.TenantId == "" {
+		return errors.New("tenantId must not be empty")
+	}
+	if options.GroupId == "" {
+		return errors.New("groupId must not be empty")
+	}
+	if options.RequestId == "" {
+		return errors.New("requestId must not be empty")
+	}
+	env := appCommon.GetEnvironment()
+	partition := env.GetAccountPartition(options.GroupId)
+	bpd, err := json.Marshal(pd)
 	if err != nil {
-		env.GetLogger().Error(err, "Error marshalling definition.")
 		return err
 	}
-
-	b := make([]byte, 32)
-	_, err = rand.Read(b)
-
-	if err != nil {
-		env.GetLogger().Error(err, "Error creating rand")
+	nonce := make([]byte, 32)
+	if _, err = rand.Read(nonce); err != nil {
 		return err
 	}
-
-	err = session.Query(queryString,
-		env.GetRegion(),  // region
-		env.GetCountry(), //country
-		options.Id,
-		base64.RawStdEncoding.EncodeToString(pD), //presentation Definition
-		model.PresentationRequested,              //status
-		options.RequestId,
-		base64.RawStdEncoding.EncodeToString(b), //nonce
-		options.GroupId,
-		options.Ttl, //TTL
-	).WithContext(ctx).Exec()
-
-	if err != nil {
-		env.GetLogger().Error(err, "Error during db update.")
-		return err
-	}
-
-	return nil
+	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,presentationDefinition,status,last_update_timestamp,nonce) VALUES(?,?,?,?,?,?,?,?,toTimestamp(now()),?) USING TTL ?`
+	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawStdEncoding.EncodeToString(nonce), options.Ttl).WithContext(ctx).Exec()
 }
 
-func GetEntriesFromDb(ctx context.Context, tenantId string, id string) ([]model.VerificationEntry, error) {
-	return getEntriesFromDb(ctx, tenantId, id, "groupId")
+func updateKey(ctx context.Context, tenantId, id string) (*model.VerificationEntry, error) {
+	return GetEntryFromDb(ctx, tenantId, id)
 }
 
-func AssignEntryToGroup(ctx context.Context, tenantId string, id string, groupId string) error {
-	env := common.GetEnvironment()
-	session := env.GetSession()
-
-	queryString := fmt.Sprintf(`UPDATE %s.presentations SET groupId=?,last_update_timestamp=toTimestamp(now()) WHERE 
-		region=? AND 
-		country=? AND
-		id=?;`, tenantId)
-
-	err := session.Query(queryString,
-		groupId,          //groupId
-		env.GetRegion(),  // region
-		env.GetCountry(), //country
-		id).WithContext(ctx).Exec()
-
+func AssignEntryToGroup(ctx context.Context, tenantId, id, groupId string) error {
+	if groupId == "" {
+		return errors.New("groupId must not be empty")
+	}
+	row, err := updateKey(ctx, tenantId, id)
 	if err != nil {
-		env.GetLogger().Error(err, "Error during db update.")
 		return err
 	}
-	return nil
+	// groupId is a clustering key and cannot be updated in place. Reinsert under the new key, then remove the old row.
+	if row.GroupId == groupId {
+		return nil
+	}
+	return fmt.Errorf("groupId is part of the Cassandra primary key and must be supplied when the presentation is created (current=%q requested=%q)", row.GroupId, groupId)
 }
 
-func UpdateDbStatus(ctx context.Context, tenantId string, status string, id string) error {
-	env := common.GetEnvironment()
-	session := env.GetSession()
-
-	queryString := fmt.Sprintf(`UPDATE %s.presentations SET state=?,last_update_timestamp=toTimestamp(now()) WHERE 
-		region=? AND 
-		country=? AND
-		id=?;`, tenantId)
-
-	err := session.Query(queryString,
-		status,           //status
-		env.GetRegion(),  // region
-		env.GetCountry(), //country
-		id).WithContext(ctx).Exec()
-
+func UpdateDbStatus(ctx context.Context, tenantId, status, id string) error {
+	env := appCommon.GetEnvironment()
+	row, err := updateKey(ctx, tenantId, id)
 	if err != nil {
-		env.GetLogger().Error(err, "Error during db update.")
 		return err
 	}
-	return nil
+	q := `UPDATE ocm.presentations SET status=?,last_update_timestamp=toTimestamp(now()) WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`
+	return env.GetSession().Query(q, status, row.Partition, row.Region, row.Country, row.TenantId, row.GroupId, row.RequestId).WithContext(ctx).Exec()
 }
-
-func StorePresentation(ctx context.Context, id string, tenantId string, proof []byte) error {
-	env := common.GetEnvironment()
-	session := env.GetSession()
-
-	queryString := fmt.Sprintf(`UPDATE %s.presentations SET state=?,last_update_timestamp=toTimestamp(now()),presentation=? WHERE
-		region=? AND
-		country=? AND
-		id=?;`, tenantId)
-
-	err := session.Query(queryString,
-		model.PresentationReceived, //status
-		base64.RawStdEncoding.EncodeToString(proof),
-		env.GetRegion(),  // region
-		env.GetCountry(), //country
-		id).WithContext(ctx).Exec()
-
+func StorePresentation(ctx context.Context, id, tenantId string, proof []byte) error {
+	env := appCommon.GetEnvironment()
+	row, err := updateKey(ctx, tenantId, id)
 	if err != nil {
-		env.GetLogger().Error(err, "Error during db update.")
 		return err
 	}
-	return nil
+	q := `UPDATE ocm.presentations SET status=?,last_update_timestamp=toTimestamp(now()),presentation=? WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`
+	return env.GetSession().Query(q, model.PresentationReceived, base64.RawStdEncoding.EncodeToString(proof), row.Partition, row.Region, row.Country, row.TenantId, row.GroupId, row.RequestId).WithContext(ctx).Exec()
 }
-
-func StoreRequest(ctx context.Context, requestId string, tenantId string, id string, requestObject *presentation.RequestObject) error {
-	env := common.GetEnvironment()
-	session := env.GetSession()
-
-	queryString := fmt.Sprintf(`UPDATE %s.presentations SET state=?,last_update_timestamp=toTimestamp(now()),presentationDefinition=?,redirectUri=?,nonce=?,requestId=?,responseUri=?,responseMode=?,responseType=?,ClientId=? WHERE 
-		region=? AND 
-		country=? AND
-		id=?;`, tenantId)
-
+func StoreRequest(ctx context.Context, requestId, tenantId, groupId string, requestObject *presentation.RequestObject) error {
+	if tenantId == "" {
+		return errors.New("tenantId must not be empty")
+	}
+	if groupId == "" {
+		return errors.New("groupId must not be empty")
+	}
+	if requestId == "" {
+		return errors.New("requestId must not be empty")
+	}
+	env := appCommon.GetEnvironment()
+	partition := env.GetAccountPartition(groupId)
 	b, err := json.Marshal(requestObject.PresentationDefinition)
-
 	if err != nil {
-		env.GetLogger().Logger.Error(err, "Error during db update.")
 		return err
 	}
-
-	err = session.Query(queryString,
-		model.PresentationRequested, //status
-		base64.RawStdEncoding.EncodeToString(b),
-		requestObject.RedirectUri,
-		requestObject.Nonce,
-		requestId,
-		requestObject.ResponseUri,
-		requestObject.ResponseMode,
-		requestObject.ResponseType,
-		requestObject.ClientID,
-		env.GetRegion(),  // region
-		env.GetCountry(), //country
-		id).WithContext(ctx).Exec()
-
-	if err != nil {
-		env.GetLogger().Logger.Error(err, "Error during db update.")
-		return err
-	}
-	return nil
+	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,status,last_update_timestamp,presentationDefinition,redirectUri,nonce,responseUri,responseMode,responseType,clientId) VALUES(?,?,?,?,?,?,?,toTimestamp(now()),?,?,?,?,?,?,?)`
+	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId, model.PresentationRequested, base64.RawStdEncoding.EncodeToString(b), requestObject.RedirectUri, requestObject.Nonce, requestObject.ResponseUri, requestObject.ResponseMode, requestObject.ResponseType, requestObject.ClientID).WithContext(ctx).Exec()
 }

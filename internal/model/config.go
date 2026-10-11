@@ -3,17 +3,23 @@ package model
 import (
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
 	config "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/config"
+	"time"
 )
 
 type Config struct {
-	config.BaseConfig    `mapstructure:",squash"`
-	ServingPort          string `mapstructure:"servingPort" envconfig:"SERVINGPORT" default:"8080"`
-	PublicBasePath       string `mapstructure:"publicBasePath" envconfig:"PUBLICBASEPATH" default:"/api/presentation/proof"`
-	CassandraHosts       string `mapstructure:"cassandraHosts" envconfig:"CASSANDRAHOSTS"`
-	CassandraUser        string `mapstructure:"cassandraUser" envconfig:"CASSANDRAUSER"`
-	CassandraPassword    string `mapstructure:"cassandraPassword" envconfig:"CASSANDRAPASSWORD"`
-	Country              string `mapstructure:"country" envconfig:"COUNTRY"`
-	Region               string `mapstructure:"region" envconfig:"REGION"`
+	config.BaseConfig `mapstructure:",squash"`
+	ServingPort       string `mapstructure:"servingPort" envconfig:"SERVINGPORT" default:"8080"`
+	PublicBasePath    string `mapstructure:"publicBasePath" envconfig:"PUBLICBASEPATH" default:"/api/presentation/proof"`
+	CassandraHosts    string `mapstructure:"cassandraHosts" envconfig:"CASSANDRAHOSTS"`
+	CassandraUser     string `mapstructure:"cassandraUser" envconfig:"CASSANDRAUSER"`
+	CassandraPassword string `mapstructure:"cassandraPassword" envconfig:"CASSANDRAPASSWORD"`
+	Country           string `mapstructure:"country" envconfig:"COUNTRY"`
+	Region            string `mapstructure:"region" envconfig:"REGION"`
+	Migrations        struct {
+		Enabled bool          `mapstructure:"enabled" envconfig:"ENABLED" default:"true"`
+		Table   string        `mapstructure:"table" envconfig:"TABLE" default:"verification_schema_migration"`
+		Timeout time.Duration `mapstructure:"timeout" envconfig:"TIMEOUT" default:"2m"`
+	} `mapstructure:"migrations" envconfig:"MIGRATIONS"`
 	SigningKey           string `mapstructure:"signingKey" envconfig:"SIGNINGKEY"`
 	ExternalPresentation struct {
 		Enabled             bool   `mapstructure:"enabled" envconfig:"ENABLED"`

@@ -33,6 +33,12 @@ spec:
         image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
         imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
         env:
+          - name: CREDENTIALVERIFICATION_MIGRATIONS_TABLE
+            value: {{ .Values.config.migrations.table | quote }}
+          - name: CREDENTIALVERIFICATION_MIGRATIONS_ENABLED
+            value: {{ .Values.config.migrations.enabled | quote }}
+          - name: CREDENTIALVERIFICATION_MIGRATIONS_TIMEOUT
+            value: {{ .Values.config.migrations.timeout | quote }}
           - name: DID_RESOLVER
             value: {{ .Values.config.didResolver}}
           - name: CREDENTIALVERIFICATION_SERVERMODE

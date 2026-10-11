@@ -12,12 +12,12 @@ import (
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 
 	"github.com/cloudevents/sdk-go/v2/event"
-	"github.com/google/uuid"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
-	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
+	"github.com/google/uuid"
+	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
+	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 	commonMessageTypes "gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
 	msg "gitlab.eclipse.org/eclipse/xfsc/tsa/signer/pkg/messaging"
 )
@@ -202,18 +202,16 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 			return requestor.AuthorizationReplyError(reply, err, "error during check presentation")
 		}
 
-		id, err := SignId(authorizationRequest.TenantId, requestor.config.SigningKey)
-
+		state, err := common.EncodeVerificationState(authorizationRequest.GroupId, authorizationRequest.RequestId)
 		if err != nil {
-			return requestor.AuthorizationReplyError(reply, err, "error during id creation")
+			return requestor.AuthorizationReplyError(reply, err, "error during state creation")
 		}
 
-		reply.PresentationId = id
-		reply.RequestUri = requestor.buildUri(authorizationRequest, id)
+		reply.PresentationId = state // compatibility: this field now carries the opaque verification state
+		reply.RequestUri = requestor.buildUri(authorizationRequest, state)
 
 		requestOptions := common.PresentationRequestOptions{
 			TenantId:  authorizationRequest.TenantId,
-			Id:        id,
 			RequestId: authorizationRequest.RequestId,
 			GroupId:   authorizationRequest.GroupId,
 			Ttl:       authorizationRequest.Ttl,

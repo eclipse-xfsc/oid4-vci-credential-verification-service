@@ -1,26 +1,30 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
+	"time"
 
-	"github.com/kelseyhightower/envconfig"
-	conf "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/config"
-	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	server "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/api"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/messaging"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/migration"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services"
+	"github.com/kelseyhightower/envconfig"
+	conf "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/config"
+	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
+	server "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
 )
 
 var env *common.Environment
 
 func connectDb() error {
 	// Establish connections
-	dbSession, err := connection.Connection(env)
+	cfg := env.GetConfig()
+	dbSession, err := connection.Connection(cfg.CassandraHosts, cfg.CassandraUser, cfg.CassandraPassword)
 	if err != nil {
 		env.GetLogger().Error(err, "Database could not be connected")
 		return err
@@ -65,6 +69,19 @@ func main() {
 		env.SetConfig(&config)
 		err = connectDb()
 		if err == nil {
+			migrationTimeout := config.Migrations.Timeout
+			if migrationTimeout <= 0 {
+				migrationTimeout = 2 * time.Minute
+			}
+			if err := migration.Run(context.Background(), env.GetSession(), migration.Config{
+				Enabled: config.Migrations.Enabled,
+				Table:   config.Migrations.Table,
+				Timeout: migrationTimeout,
+			}); err != nil {
+				logger.Error(err, "Failed applying Cassandra migrations")
+				return
+			}
+
 			server := server.New(env, config.BaseConfig.ServerMode)
 
 			logger.Debug("Start Server")

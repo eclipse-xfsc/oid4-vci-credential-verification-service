@@ -7,14 +7,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
-	core "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/middleware"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services"
 	svcCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
+	"github.com/gin-gonic/gin"
+	core "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
+	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 )
 
 const (
@@ -84,12 +84,11 @@ func HandleRequestPresentation(requestor *services.PresentationRequestor, config
 			GroupId:   ctx.Request.Header.Get("x-groupId"),
 			Ttl:       ttl,
 		}
-		id, err := services.SignId(options.TenantId, config.SigningKey)
+		state, err := svcCommon.EncodeVerificationState(options.GroupId, options.RequestId)
 		if err != nil {
-			services.ErrorResponse(ctx, "Error signing id", err)
+			services.ErrorResponse(ctx, "Error creating verification state", err)
 			return
 		}
-		options.Id = id
 		var definition presentation.PresentationDefinition
 		definitionReader := base64.NewDecoder(base64.URLEncoding, strings.NewReader(queryParams.Get("presentationDefinition")))
 		if err != nil {
@@ -106,7 +105,7 @@ func HandleRequestPresentation(requestor *services.PresentationRequestor, config
 			services.ErrorResponse(ctx, "Error creating presentation request", err)
 			return
 		}
-		JwtResponse(ctx, requestor, config.PublicBasePath, id, options.TenantId, options.GroupId, ctx.Request.Header.Get("x-did"), ctx.Request.Header.Get("x-key"), config.ExternalPresentation.ClientUrlSchema)
+		JwtResponse(ctx, requestor, config.PublicBasePath, state, options.TenantId, options.GroupId, ctx.Request.Header.Get("x-did"), ctx.Request.Header.Get("x-key"), config.ExternalPresentation.ClientUrlSchema)
 	}
 }
 
@@ -129,7 +128,7 @@ func ResponseRequestObject(c *gin.Context, requestor *services.PresentationReque
 
 	path := strings.Replace(c.Request.RequestURI, "/"+id+"/request-object/request.jwt", "", -1)
 	if b && b2 {
-		JwtResponse(c, requestor, path, id, tenantId, c.Request.Header.Get("x-group"), c.Request.Header.Get("x-did"), c.Request.Header.Get("x-key"), config.ExternalPresentation.ClientUrlSchema)
+		JwtResponse(c, requestor, path, id, tenantId, c.Request.Header.Get("x-groupId"), c.Request.Header.Get("x-did"), c.Request.Header.Get("x-key"), config.ExternalPresentation.ClientUrlSchema)
 
 	} else {
 		services.ErrorResponse(c, "Params not found.", http.ErrNotSupported)

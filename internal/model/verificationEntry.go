@@ -7,9 +7,10 @@ import (
 )
 
 type VerificationEntry struct {
+	Partition              string                              `json:"partition"`
+	TenantId               string                              `json:"tenantId"`
 	Region                 string                              `json:"region"`
 	Country                string                              `json:"country"`
-	Id                     string                              `json:"id"`
 	RequestId              string                              `json:"requestId"`
 	GroupId                string                              `json:"groupid"`
 	PresentationDefinition presentation.PresentationDefinition `json:"presentationDefinition"`

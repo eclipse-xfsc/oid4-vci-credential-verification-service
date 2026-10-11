@@ -64,6 +64,10 @@ security:
   runAsGid: 1000
  
 config:
+  migrations:
+    enabled: true
+    table: verification_schema_migration
+    timeout: 2m
   #  serverMode: debug
   serverMode: production
   disableTLS: false
