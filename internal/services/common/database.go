@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/gocql/gocql"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
@@ -17,7 +18,7 @@ import (
 
 const presentationsTable = "ocm.presentations"
 
-func scanEntries(iter *gocql.Iter) ([]model.VerificationEntry, error) {
+func scanEntries(iter connection.IterInterface) ([]model.VerificationEntry, error) {
 	var partition, region, country, tenantId, groupId, requestId string
 	var definition, pres, redirectURI, status, nonce, responseURI, responseMode, responseType, clientID string
 	var lastUpdate time.Time

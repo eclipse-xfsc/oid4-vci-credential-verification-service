@@ -39,6 +39,11 @@ spec:
             value: {{ .Values.config.migrations.enabled | quote }}
           - name: CREDENTIALVERIFICATION_MIGRATIONS_TIMEOUT
             value: {{ .Values.config.migrations.timeout | quote }}
+          - name: CREDENTIALVERIFICATION_STATESIGNINGKEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ printf "%s-state-signing" (include "app.name" .) }}
+                key: state-signing-key
           - name: DID_RESOLVER
             value: {{ .Values.config.didResolver}}
           - name: CREDENTIALVERIFICATION_SERVERMODE
@@ -49,13 +54,6 @@ spec:
             value: {{.Values.config.signerService.presentationVerifyUrl}}
           - name: CREDENTIALVERIFICATION_SIGNERSERVICE_SIGNERTOPIC
             value: {{.Values.config.signerService.signerTopic}}
-         {{- if .Values.config.signing}}
-          - name: CREDENTIALVERIFICATION_SIGNINGKEY
-            valueFrom:
-              secretKeyRef:
-                name: {{ .Values.config.signing.Name }}
-                key: {{ .Values.config.signing.Key }}
-         {{- end}}
          {{- if .Values.config.cassandra}}
           - name: CREDENTIALVERIFICATION_CASSANDRAHOSTS
             value: {{.Values.config.cassandra.cassandraHosts}}

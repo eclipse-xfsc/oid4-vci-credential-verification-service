@@ -34,7 +34,7 @@ func AddExternalRoutes(server *core.Server, authHandler *services.AuthorizationH
 		config := common.GetEnvironment().GetConfig()
 		g := rg.Group(services.CredentialApiGroup)
 		mWGroup := g.Group(services.DirectGroup)
-		mWGroup.Use(middleware.VerifyId(common.GetEnvironment()))
+		mWGroup.Use(middleware.VerifyState(common.GetEnvironment()))
 		mWGroup.GET("/:id/request-object/request.jwt", func(ctx *gin.Context) {
 			ResponseRequestObject(ctx, requestor, config)
 		})

@@ -5,7 +5,6 @@ cassandraPassword: change me
 profiles: DEBUG
 country: DE
 region: EU
-signingKey: LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1FRUNBUUF3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRUp6QWxBZ0VCQkNCNDVQQlk0aVBOY0lwTVd6emYKei9uYXdxbmxIYlhTeFdjNUJWK1hyMzB5dkE9PQotLS0tLUVORCBFQyBQUklWQVRFIEtFWS0tLS0t
 externalPresentation:
   enabled: true
   authorizeEndpoint: http://localhost:8080

@@ -20,7 +20,7 @@ type Config struct {
 		Table   string        `mapstructure:"table" envconfig:"TABLE" default:"verification_schema_migration"`
 		Timeout time.Duration `mapstructure:"timeout" envconfig:"TIMEOUT" default:"2m"`
 	} `mapstructure:"migrations" envconfig:"MIGRATIONS"`
-	SigningKey           string `mapstructure:"signingKey" envconfig:"SIGNINGKEY"`
+	StateSigningKey      string `mapstructure:"stateSigningKey" envconfig:"STATESIGNINGKEY" json:"-"`
 	ExternalPresentation struct {
 		Enabled             bool   `mapstructure:"enabled" envconfig:"ENABLED"`
 		AuthorizeEndpoint   string `mapstructure:"authorizeEndpoint" envconfig:"AUTHORIZEENDPOINT"`

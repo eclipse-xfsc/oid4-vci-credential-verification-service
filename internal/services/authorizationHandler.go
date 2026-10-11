@@ -14,7 +14,6 @@ import (
 	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
 	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/types"
@@ -28,7 +27,10 @@ type AuthorizationHandler struct {
 	config    *model.Config
 }
 
-func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, config *model.Config, authUrl *url.URL) (string, error) {
+func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, config *model.Config, authUrl *url.URL) (string, error) {
+	if groupId == "" || requestId == "" {
+		return "", errors.New("groupId and requestId must not be empty")
+	}
 	if config.ExternalPresentation.ClientIdPolicy != "" {
 		var clientIdObject map[string]interface{} = make(map[string]interface{})
 		clientIdObject["clientId"] = clientId
@@ -78,26 +80,11 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 		)
 	}
 
-	requestId := uuid.New().String()
-
-	//Unique value, if present use it for random id instead of own one
-	if object.State != "" {
-		requestId = object.State
-	}
-
-	id, err := SignId(tenantId, config.SigningKey)
-
+	state, err := serviceCommon.EncodeVerificationState(groupId, requestId)
 	if err != nil {
-		return "", errors.Join(errors.New("error during signing"), err)
+		return "", errors.Join(errors.New("error creating verification state"), err)
 	}
 
-	groupId := ""
-	if headers, ok := ctx.Value(HeaderContextKey).(http.Header); ok {
-		groupId = headers.Get("x-groupId")
-		if groupId == "" {
-			groupId = headers.Get("x-group")
-		}
-	}
 	err = serviceCommon.StoreRequest(ctx, requestId, tenantId, groupId, object)
 
 	if err != nil {
@@ -105,7 +92,7 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	}
 
 	query := authUrl.Query()
-	query.Add("presentation", id)
+	query.Add("presentation", state)
 	query.Add("nonce", object.Nonce)
 	authUrl.RawQuery = query.Encode()
 
@@ -136,7 +123,15 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 		// carry headers to the request_uri call
 		ctx := context.WithValue(c.Request.Context(), HeaderContextKey, c.Request.Header)
 		if b {
-			redirect_uri, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, config, authUrl)
+			groupId := c.GetHeader("x-groupId")
+			if groupId == "" {
+				groupId = c.GetHeader("x-group")
+			}
+			requestId := c.GetHeader("x-requestId")
+			if requestId == "" {
+				requestId = c.GetHeader("x-request-id")
+			}
+			redirect_uri, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, groupId, requestId, config, authUrl)
 
 			if err == nil {
 				handler.logger.Info("Redirect to: " + redirect_uri)
@@ -228,7 +223,7 @@ func (handler *AuthorizationHandler) receive(event event.Event) {
 
 		ctx = context.WithValue(ctx, HeaderContextKey, headers)
 
-		_, err = handler.HandleRequestObject(ctx, remoteRequest.ClientId, remoteRequest.RequestUri, remoteRequest.TenantId, handler.config, authUrl)
+		_, err = handler.HandleRequestObject(ctx, remoteRequest.ClientId, remoteRequest.RequestUri, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, handler.config, authUrl)
 
 		if err != nil {
 			handler.logger.Error(err, "Error during request object handling")

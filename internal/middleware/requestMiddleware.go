@@ -1,23 +1,36 @@
 package middleware
 
 import (
-	"github.com/gin-gonic/gin"
+	"net/http"
+
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services"
+	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
+	"github.com/gin-gonic/gin"
 )
 
-func VerifyId(env *common.Environment) gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		id, b := ctx.Params.Get("id")
-		tenantId, b2 := ctx.Params.Get("tenantId")
+const (
+	VerificationGroupIDContextKey   = "verificationGroupId"
+	VerificationRequestIDContextKey = "verificationRequestId"
+)
 
-		if b && b2 {
-			allow, err := services.VerifyId(tenantId, id, env.GetConfig().SigningKey)
-			if !allow || err != nil {
-				ctx.AbortWithStatus(401)
-			}
-		} else {
-			ctx.AbortWithStatus(401)
+// VerifyState validates the HMAC-protected verification state carried in the
+// legacy :id route parameter and exposes its groupId/requestId to handlers.
+func VerifyState(_ *common.Environment) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		state, ok := ctx.Params.Get("id")
+		if !ok || state == "" {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
 		}
+
+		verificationState, err := serviceCommon.DecodeVerificationState(state)
+		if err != nil {
+			ctx.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		ctx.Set(VerificationGroupIDContextKey, verificationState.GroupId)
+		ctx.Set(VerificationRequestIDContextKey, verificationState.RequestId)
+		ctx.Next()
 	}
 }

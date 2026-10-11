@@ -15,7 +15,7 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 		g := rg.Group(services.InternalApiGroup)
 
 		pR := g.Group("proofs")
-		pR.Use(middleware.VerifyId(common.GetEnvironment()))
+		pR.Use(middleware.VerifyState(common.GetEnvironment()))
 
 		//Requests an incoming ID from the Database
 		pR.GET("/proof/:id", func(ctx *gin.Context) {
