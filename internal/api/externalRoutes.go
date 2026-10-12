@@ -12,19 +12,19 @@ import (
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services"
 	svcCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"github.com/gin-gonic/gin"
 	core "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 )
 
 const (
-	UnsupportedResponseType  = "Unsupported ResponseType"
-	NoClientId               = "No Client Id"
-	NoResponseType           = "No ResponseType"
-	NoRedirectUri            = "No Redirect Uri"
-	NoNonce                  = "No nonce"
-	NoPresentationDefinition = "No Presentation Definition present"
-	TenantIdMissing          = "Tenant Id missing"
+	UnsupportedResponseType = "Unsupported ResponseType"
+	NoClientId              = "No Client Id"
+	NoResponseType          = "No ResponseType"
+	NoRedirectUri           = "No Redirect Uri"
+	NoNonce                 = "No nonce"
+	NoDCQLQuery             = "No DCQL query present"
+	TenantIdMissing         = "Tenant Id missing"
 
 	DefaultPresentationRequestTTL = 3600
 )
@@ -66,7 +66,7 @@ func AddExternalRoutes(server *core.Server, authHandler *services.AuthorizationH
 // @Param x-ttl header int 200 "TTL"
 // @Param x-did header int false "DID"
 // @Param x-key header int false "KEY"
-// @Param presentationDefinition query string true "Presentation Definition base64 url encoded"
+// @Param dcqlQuery query string true "DCQL query base64url encoded"
 // @Success 200 {string} jwt
 // @Failure 400 {object} services.ServerErrorResponse
 // @Failure 500 {object} services.ServerErrorResponse
@@ -78,29 +78,30 @@ func HandleRequestPresentation(requestor *services.PresentationRequestor, config
 		if err != nil {
 			ttl = DefaultPresentationRequestTTL
 		}
+		clientID := ctx.Request.Header.Get("x-client-id")
+		if clientID == "" {
+			did := ctx.Request.Header.Get("x-did")
+			if did != "" {
+				clientID = "decentralized_identifier:" + did
+			}
+		}
 		var options = svcCommon.PresentationRequestOptions{
-			TenantId:  ctx.Request.Header.Get("x-tenantId"),
-			RequestId: queryParams.Get("requestId"),
-			GroupId:   ctx.Request.Header.Get("x-groupId"),
-			Ttl:       ttl,
+			TenantId: ctx.Request.Header.Get("x-tenantId"), RequestId: queryParams.Get("requestId"),
+			GroupId: ctx.Request.Header.Get("x-groupId"), Ttl: ttl, ClientId: clientID,
 		}
 		state, err := svcCommon.EncodeVerificationState(options.GroupId, options.RequestId)
 		if err != nil {
 			services.ErrorResponse(ctx, "Error creating verification state", err)
 			return
 		}
-		var definition presentation.PresentationDefinition
-		definitionReader := base64.NewDecoder(base64.URLEncoding, strings.NewReader(queryParams.Get("presentationDefinition")))
+		var query presentation.DCQLQuery
+		queryReader := base64.NewDecoder(base64.RawURLEncoding, strings.NewReader(queryParams.Get("dcqlQuery")))
+		err = json.NewDecoder(queryReader).Decode(&query)
 		if err != nil {
-			services.ErrorResponse(ctx, "Error decoding presentation definition", err)
+			services.ErrorResponse(ctx, "Error decoding DCQL query", err)
 			return
 		}
-		err = json.NewDecoder(definitionReader).Decode(&definition)
-		if err != nil {
-			services.ErrorResponse(ctx, "Error decoding presentation definition json", err)
-			return
-		}
-		err = requestor.CreatePresentationRequest(definition, options, ctx.Request.Context())
+		err = requestor.CreatePresentationRequest(query, options, ctx.Request.Context())
 		if err != nil {
 			services.ErrorResponse(ctx, "Error creating presentation request", err)
 			return
@@ -144,31 +145,4 @@ func JwtResponse(c *gin.Context, requestor *services.PresentationRequestor, path
 	}
 	c.Header("Content-Type", "application/jwt")
 	c.JSON(200, string(str))
-}
-
-func RespondToken(c *gin.Context, authRequest presentation.RequestObject, tenantId string) {
-
-	r, err := http.NewRequest("GET", authRequest.PresentationDefinitionUri, nil)
-	r.Header.Add("Content-Type", "application/json")
-	if err != nil {
-		services.InternalErrorResponse(c, err.Error(), err)
-		return
-	}
-
-	client := &http.Client{}
-	res, err := client.Do(r)
-	if err != nil {
-		services.InternalErrorResponse(c, "Presentation Definition URI not reachable.", err)
-		return
-	}
-
-	defer res.Body.Close()
-
-	var presentationDefinition presentation.PresentationDefinition
-
-	derr := json.NewDecoder(res.Body).Decode(&presentationDefinition)
-	if derr != nil {
-		services.InternalErrorResponse(c, "Presentation Definition not valid.", err)
-		return
-	}
 }

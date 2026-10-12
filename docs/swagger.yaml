@@ -31,7 +31,7 @@ definitions:
       presentation:
         items: {}
         type: array
-      presentationDefinition:
+      dcqlQuery:
         $ref: '#/definitions/presentation.PresentationDefinition'
       redirectUri:
         type: string
@@ -512,7 +512,7 @@ paths:
         type: string
       - description: The presentation submission
         in: formData
-        name: presentation_submission
+        name: state
         required: true
         type: string
       produces:
@@ -588,9 +588,9 @@ paths:
         in: query
         name: ttl
         type: integer
-      - description: Presentation Definition base64 url encoded
+      - description: DCQL query base64url encoded
         in: query
-        name: presentationDefinition
+        name: dcqlQuery
         required: true
         type: string
       produces:

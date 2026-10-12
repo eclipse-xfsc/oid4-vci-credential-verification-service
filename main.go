@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"os"
 	"time"
 
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/api"
@@ -24,7 +25,7 @@ var env *common.Environment
 func connectDb() error {
 	// Establish connections
 	cfg := env.GetConfig()
-	dbSession, err := connection.Connection(cfg.CassandraHosts, cfg.CassandraUser, cfg.CassandraPassword)
+	dbSession, err := connection.Connection(cfg.Cassandra.Host, cfg.Cassandra.User, cfg.Cassandra.Password)
 	if err != nil {
 		env.GetLogger().Error(err, "Database could not be connected")
 		return err
@@ -43,6 +44,21 @@ func connectDb() error {
 // @host			localhost:8080
 
 func main() {
+	// XFSC injection emits provider variables with the service prefix. The
+	// NATS configuration is nested under messaging.nats, while the operator
+	// supplies NATS_URL. Bridge this mismatch before loading configuration.
+	if injected, ok := os.LookupEnv("CREDENTIALVERIFICATION_NATS_URL"); ok {
+		if _, explicitlyConfigured := os.LookupEnv("CREDENTIALVERIFICATION_MESSAGING_NATS_URL"); !explicitlyConfigured {
+			_ = os.Setenv("CREDENTIALVERIFICATION_MESSAGING_NATS_URL", injected)
+		}
+	}
+	// The DID library expects the unprefixed variable. Preserve an explicit
+	// DID_RESOLVER override, otherwise use the injected provider output.
+	if injected, ok := os.LookupEnv("CREDENTIALVERIFICATION_DID_RESOLVER"); ok {
+		if _, explicitlyConfigured := os.LookupEnv("DID_RESOLVER"); !explicitlyConfigured {
+			_ = os.Setenv("DID_RESOLVER", injected)
+		}
+	}
 	env = common.GetEnvironment()
 	var config model.Config
 	err := conf.LoadConfig("CREDENTIALVERIFICATION", &config, nil)

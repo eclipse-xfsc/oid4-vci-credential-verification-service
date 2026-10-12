@@ -433,7 +433,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "description": "The presentation submission",
-                        "name": "presentation_submission",
+                        "name": "state",
                         "in": "formData",
                         "required": true
                     }
@@ -545,8 +545,8 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Presentation Definition base64 url encoded",
-                        "name": "presentationDefinition",
+                        "description": "DCQL query base64url encoded",
+                        "name": "dcqlQuery",
                         "in": "query",
                         "required": true
                     }
@@ -623,7 +623,7 @@ const docTemplate = `{
                     "type": "array",
                     "items": {}
                 },
-                "presentationDefinition": {
+                "dcqlQuery": {
                     "$ref": "#/definitions/presentation.PresentationDefinition"
                 },
                 "redirectUri": {

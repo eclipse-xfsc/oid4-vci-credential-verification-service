@@ -27,16 +27,16 @@ A [nats message](https://gitlab.eclipse.org/eclipse/xfsc/organisational-credenti
 sequenceDiagram
 title Authorization Link Creation
 
-Internal System->> Internal System: Build Presentation Definition
-Internal System->> Credential Verification Service: Send Nats Message with Presentation Definition/TTL etc
-Credential Verification Service->>Credential Verification Service: Build request.jwt Object with Presentation Definition
+Internal System->> Internal System: Build DCQL Query
+Internal System->> Credential Verification Service: Send Nats Message with DCQL Query/TTL etc
+Credential Verification Service->>Credential Verification Service: Build request.jwt Object with DCQL Query
 Credential Verification Service->>Credential Verification Service: Create Auth Link with request.jwt
 Credential Verification Service->>Credential Verification Service: Stores Request with TTL
 Credential Verification Service->> Internal System: Replies with Auth Link and Presentation ID
 Internal System -->> External System: Submits Link or redirect to any other System (see Authorization Link Processing)
 ```
 
-Note: Building a Presentation Definition is custom business and needs to be done by business specific controllers. 
+Note: Building a DCQL Query is custom business and needs to be done by business specific controllers. 
 Note: The credential selection is currently an functionality of storage service, but it can be selected from any other system which understands the way of doing it. 
 
 
@@ -56,7 +56,7 @@ end
 Credential Verification Service->> Credential Verification Service: Extract Request Object Url
 Credential Verification Service->> Credential Verification Service: Download Request Object
 Credential Verification Service->> Credential Verification Service: Verifies Request Object
-Credential Verification Service->> Credential Verification Service: Extract Presentation Definition
+Credential Verification Service->> Credential Verification Service: Extract DCQL Query
 Credential Verification Service->> Credential Verification Service: Store Request in DB
 alt
 Credential Verification Service-->> Internal System: Redirect to Internal System
@@ -64,17 +64,17 @@ end
 alt 
 Credential Verification Service-->> Internal System: Publish Message about new Record
 end
-Internal System->> Credential Verification Service: Pick up of Presentation Definition (See Presentation Definition Processing)
+Internal System->> Credential Verification Service: Pick up of DCQL Query (See DCQL Query Processing)
 ```
 
-## Presentation Definition Processing
+## DCQL Query Processing
 
 After picking up a presentation definition the definition must be fullfilled by selecting the right credentials. 
 
 ```mermaid
 sequenceDiagram
-title Presentation Definition Processing
-Internal System ->> Internal System: Checks Presentation Definition
+title DCQL Query Processing
+Internal System ->> Internal System: Checks DCQL Query
 Internal System ->> Internal System: Selects Credential according to Definition
 Internal System ->> Internal System: Creates Submission Data
 Internal System ->> Internal System: Creates and Signs VP
@@ -96,9 +96,23 @@ Note: The Credential Verification Service can be either in the role of a holder 
 
 ## Retrieve data from database
 
-### Retrieve Presentation Definitions
+### Retrieve DCQL Querys
 
 ```bash
 cqlsh <cassandra host> <cassandra port> -u <cassandra user> -p <cassandra password> -e "SELECT * FROM tenant_space.presentations;"
 
 ```
+
+## OID4VP 1.0 / library 1.9.2
+
+This branch uses `github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.2` and the OID4VP 1.0 DCQL model. New presentation requests carry a `dcql_query`; `presentation_definition` and `presentation_submission` are not part of this flow. The concrete DCQL query is stored with the verification transaction and the returned `vp_token` is validated against that snapshot.
+
+The HTTP request endpoint accepts the base64url encoded DCQL JSON in the `dcqlQuery` query parameter. The NATS creation message uses the `dcql_query` field.
+
+
+## XFSC injection-ready Helm deployment
+
+The Helm chart now supports `ResourceClaim`-backed Cassandra provisioning and
+operator-provided NATS, signer and DID resolver dependencies. See
+[`deployment/helm/INJECTION.md`](deployment/helm/INJECTION.md) for provider
+contracts, configuration, and validation instructions.

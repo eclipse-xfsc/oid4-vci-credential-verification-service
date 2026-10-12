@@ -1,0 +1,23 @@
+{{- $annotations := default dict .Values.podAnnotations -}}
+{{- $injectionEnabled := eq (default "false" (index $annotations "inject.xfsc.io/enabled")) "true" -}}
+{{- if and $injectionEnabled .Values.resourceProvider.enabled }}
+apiVersion: resources.xfsc.io/v1alpha1
+kind: ResourceProvider
+metadata:
+  name: {{ default "verification" .Values.resourceProvider.name | quote }}
+spec:
+  type: verification
+  scope: {{ .Values.resourceProvider.scope | quote }}
+  description: {{ .Values.resourceProvider.description | quote }}
+{{- with .Values.resourceProvider.allow.namespaces }}
+  allow:
+    namespaces:
+{{ toYaml . | indent 6 }}
+{{- end }}
+  outputs:
+    env:
+      VERIFICATION_AUTHORIZATION_TOPIC: {{ .Values.config.topics.authorization | quote }}
+      VERIFICATION_AUTHORIZATION_REPLY_TOPIC: {{ .Values.config.topics.authorizationReply | quote }}
+      VERIFICATION_PROOF_NOTIFY_TOPIC: {{ .Values.config.topics.proofNotify | quote }}
+      VERIFICATION_PRESENTATION_REQUEST_TOPIC: {{ .Values.config.topics.presentationRequest | quote }}
+{{- end }}

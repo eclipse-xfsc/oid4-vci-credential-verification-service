@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: "{{ template "app.name" . }}"
+  name: {{ include "app.name" . | quote }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "app.labels" . | nindent 4 }}
@@ -20,86 +20,121 @@ spec:
       labels:
         {{- include "app.labels" . | nindent 8 }}
       annotations:
-{{- if .Values.podAnnotations }}
-{{ toYaml .Values.podAnnotations | indent 8 }}
-{{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       securityContext:
         {{- include "app.securitycontext" . | nindent 8 }}
+      {{- with .Values.image.pullSecrets }}
       imagePullSecrets:
-        - name: {{ .Values.image.pullSecrets }}
+        - name: {{ . | quote }}
+      {{- end }}
       containers:
-      - name: {{ .Chart.Name }}
-        image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
-        imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
-        env:
-          - name: CREDENTIALVERIFICATION_MIGRATIONS_TABLE
-            value: {{ .Values.config.migrations.table | quote }}
-          - name: CREDENTIALVERIFICATION_MIGRATIONS_ENABLED
-            value: {{ .Values.config.migrations.enabled | quote }}
-          - name: CREDENTIALVERIFICATION_MIGRATIONS_TIMEOUT
-            value: {{ .Values.config.migrations.timeout | quote }}
-          - name: CREDENTIALVERIFICATION_STATESIGNINGKEY
-            valueFrom:
-              secretKeyRef:
-                name: {{ printf "%s-state-signing" (include "app.name" .) }}
-                key: state-signing-key
-          - name: DID_RESOLVER
-            value: {{ .Values.config.didResolver}}
-          - name: CREDENTIALVERIFICATION_SERVERMODE
-            value: "{{ .Values.config.serverMode}}"
-          - name: CREDENTIALVERIFICATION_SIGNERSERVICE_PRESENTATIONSIGNURL
-            value: {{.Values.config.signerService.presentationSignUrl}}
-          - name: CREDENTIALVERIFICATION_SIGNERSERVICE_PRESENTATIONVERIFYURL
-            value: {{.Values.config.signerService.presentationVerifyUrl}}
-          - name: CREDENTIALVERIFICATION_SIGNERSERVICE_SIGNERTOPIC
-            value: {{.Values.config.signerService.signerTopic}}
-         {{- if .Values.config.cassandra}}
-          - name: CREDENTIALVERIFICATION_CASSANDRAHOSTS
-            value: {{.Values.config.cassandra.cassandraHosts}}
-          - name: CREDENTIALVERIFICATION_CASSANDRAUSER
-            value: {{.Values.config.cassandra.cassandraUser}}
-          - name: CREDENTIALVERIFICATION_CASSANDRAPASSWORD
-            valueFrom:
-              secretKeyRef:
-                name: {{.Values.config.cassandra.Name}}
-                key: {{.Values.config.cassandra.Key}}
-        {{- end}}
-          - name: CREDENTIALVERIFICATION_MESSAGING_NATS_URL
-            value: {{.Values.config.messaging.nats.url}}
-          - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATION
-            value: {{.Values.config.topics.authorization}}
-          - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATIONREPLY
-            value: {{.Values.config.topics.authorizationReply}}
-          - name: CREDENTIALVERIFICATION_TOPICS_PROOFNOTIFY
-            value: {{.Values.config.topics.proofNotify}}
-          - name: CREDENTIALVERIFICATION_TOPICS_PRESENTATINREQUEST
-            value: {{.Values.config.topics.presentationRequest}}
-          - name: CREDENTIALVERIFICATION_TOPICS_STORAGEREQUEST
-            value: {{.Values.config.topics.storageRequest}}
-          - name: CREDENTIALVERIFICATION_LOG_LEVEL
-            value: info
-          - name: CREDENTIALVERIFICATION_IS_DEV
-            value: "false"
-          - name: CREDENTIALVERIFICATION_AUTHORIZEENDPOINT
-            value: {{.Values.config.externalPresentation.authorizeEndpoint}}
-          - name: CREDENTIALVERIFICATION_CLIENTURLSCHEMA
-            value: {{.Values.config.externalPresentation.clientUrlSchema}}
-          - name: CREDENTIALVERIFICATION_REQUESTOBJECTPOLICY
-            value: {{.Values.config.externalPresentation.requestObjectPolicy}}
-          - name: CREDENTIALVERIFICATION_CLIENTIDPOLICY
-            value: {{.Values.config.externalPresentation.clientIdPolicy}}
-          - name: CREDENTIALVERIFICATION_ENABLED
-            value: {{.Values.config.externalPresentation.enbaled}}
-        ports:
-        - name: http
-          containerPort: {{ .Values.server.http.port }}
-        readinessProbe:
-          httpGet:
-            path: /v1/metrics/health
-            port: {{ .Values.server.http.port }}
-          initialDelaySeconds: 5
-          periodSeconds: 5
-          successThreshold: 2
-          failureThreshold: 2
-          timeoutSeconds: 5
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}/{{ .Values.image.name }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+          env:
+            {{- $annotations := default dict .Values.podAnnotations }}
+            {{- $injectionEnabled := eq (default "false" (index $annotations "inject.xfsc.io/enabled")) "true" }}
+
+            - name: CREDENTIALVERIFICATION_MIGRATIONS_TABLE
+              value: {{ .Values.config.migrations.table | quote }}
+            - name: CREDENTIALVERIFICATION_MIGRATIONS_ENABLED
+              value: {{ .Values.config.migrations.enabled | quote }}
+            - name: CREDENTIALVERIFICATION_MIGRATIONS_TIMEOUT
+              value: {{ .Values.config.migrations.timeout | quote }}
+            - name: CREDENTIALVERIFICATION_STATESIGNINGKEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-state-signing" (include "app.name" .) | quote }}
+                  key: state-signing-key
+            - name: CREDENTIALVERIFICATION_SERVERMODE
+              value: {{ .Values.config.serverMode | quote }}
+            - name: CREDENTIALVERIFICATION_SERVINGPORT
+              value: {{ .Values.config.servingPort | quote }}
+            - name: CREDENTIALVERIFICATION_COUNTRY
+              value: {{ .Values.config.country | quote }}
+            - name: CREDENTIALVERIFICATION_REGION
+              value: {{ .Values.config.region | quote }}
+            - name: CREDENTIALVERIFICATION_MESSAGING_PROTOCOL
+              value: {{ .Values.config.messaging.protocol | quote }}
+            - name: CREDENTIALVERIFICATION_MESSAGING_NATS_QUEUEGROUP
+              value: {{ .Values.config.messaging.nats.queueGroup | quote }}
+            - name: CREDENTIALVERIFICATION_MESSAGING_NATS_TIMEOUTINSEC
+              value: {{ .Values.config.messaging.nats.timeoutInSec | quote }}
+            - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATION
+              value: {{ .Values.config.topics.authorization | quote }}
+            - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATIONREPLY
+              value: {{ .Values.config.topics.authorizationReply | quote }}
+            - name: CREDENTIALVERIFICATION_TOPICS_PROOFNOTIFY
+              value: {{ .Values.config.topics.proofNotify | quote }}
+            - name: CREDENTIALVERIFICATION_TOPICS_PRESENTATINREQUEST
+              value: {{ .Values.config.topics.presentationRequest | quote }}
+            - name: CREDENTIALVERIFICATION_TOPICS_STORAGEREQUEST
+              value: {{ .Values.config.topics.storageRequest | quote }}
+            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED
+              value: {{ .Values.config.externalPresentation.enabled | quote }}
+            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_AUTHORIZEENDPOINT
+              value: {{ .Values.config.externalPresentation.authorizeEndpoint | quote }}
+            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA
+              value: {{ .Values.config.externalPresentation.clientUrlSchema | quote }}
+            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_REQUESTOBJECTPOLICY
+              value: {{ .Values.config.externalPresentation.requestObjectPolicy | quote }}
+            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTIDPOLICY
+              value: {{ .Values.config.externalPresentation.clientIdPolicy | quote }}
+            - name: CREDENTIALVERIFICATION_LOG_LEVEL
+              value: info
+            - name: CREDENTIALVERIFICATION_IS_DEV
+              value: "false"
+
+            {{- if not $injectionEnabled }}
+            # Standalone deployment: resolve all dependencies from values.yaml.
+            - name: CREDENTIALVERIFICATION_MESSAGING_NATS_URL
+              value: {{ .Values.config.messaging.nats.url | quote }}
+            - name: CREDENTIALVERIFICATION_CASSANDRA_HOST
+              value: {{ .Values.config.cassandra.host | quote }}
+            - name: CREDENTIALVERIFICATION_CASSANDRA_KEYSPACE
+              value: {{ .Values.config.cassandra.keyspace | quote }}
+            - name: CREDENTIALVERIFICATION_CASSANDRA_USER
+              value: {{ .Values.config.cassandra.user | quote }}
+            - name: CREDENTIALVERIFICATION_CASSANDRA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.config.cassandra.passwordSecret | quote }}
+                  key: {{ .Values.config.cassandra.passwordKey | quote }}
+            - name: CREDENTIALVERIFICATION_SIGNER_PRESENTATIONSIGNURL
+              value: {{ .Values.config.signer.presentationSignUrl | quote }}
+            - name: CREDENTIALVERIFICATION_SIGNER_PRESENTATIONVERIFYURL
+              value: {{ .Values.config.signer.presentationVerifyUrl | quote }}
+            - name: CREDENTIALVERIFICATION_SIGNER_TOPIC
+              value: {{ .Values.config.signer.topic | quote }}
+            - name: DID_RESOLVER
+              value: {{ .Values.config.didResolver | quote }}
+            {{- else }}
+            # Cassandra credentials are backed by the ResourceClaim/ExternalSecret.
+            # Host/keyspace, NATS, signer and DID resolver endpoints are injected
+            # by their ResourceProviders via inject.xfsc.io/needs.
+            - name: CREDENTIALVERIFICATION_CASSANDRA_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-cassandra-credentials" .Release.Name | quote }}
+                  key: username
+            - name: CREDENTIALVERIFICATION_CASSANDRA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%s-cassandra-credentials" .Release.Name | quote }}
+                  key: password
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.http.port }}
+          readinessProbe:
+            httpGet:
+              path: /v1/metrics/health
+              port: {{ .Values.server.http.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            successThreshold: 2
+            failureThreshold: 2
+            timeoutSeconds: 5

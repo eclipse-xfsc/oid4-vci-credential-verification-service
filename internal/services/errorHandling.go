@@ -3,8 +3,8 @@ package services
 import (
 	"errors"
 
-	"github.com/gin-gonic/gin"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
+	"github.com/gin-gonic/gin"
 )
 
 type ServerErrorResponse struct {

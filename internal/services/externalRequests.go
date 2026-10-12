@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,9 +10,9 @@ import (
 	"net/url"
 	"strings"
 
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/crypto/jwt"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
+	"gitlab.eclipse.org/eclipse/xfsc/libraries/crypto/jwt"
 )
 
 const HeaderContextKey = "headers"
@@ -82,14 +81,7 @@ func sendRequestWithRedirects(url *url.URL, ctx context.Context) (*presentation.
 }
 
 func GetHttpClient() *http.Client {
-	// fixme this is a workaround for the self signed certificate
-	transport := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	// Use the Transport in the client
-	client := &http.Client{Transport: transport}
-	return client
+	return http.DefaultClient
 }
 
 func handleSuccessfulResponse(resp *http.Response) (*presentation.RequestObject, error) {

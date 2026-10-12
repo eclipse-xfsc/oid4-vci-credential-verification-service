@@ -3,10 +3,10 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"github.com/stretchr/testify/require"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"io"
 	"os"
 	"testing"

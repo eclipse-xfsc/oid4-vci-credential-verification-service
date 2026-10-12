@@ -1,6 +1,6 @@
 package model
 
-import "gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
+import "github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 
 type ProofModel struct {
 	Payload       []presentation.FilterResult

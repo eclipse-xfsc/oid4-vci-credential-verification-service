@@ -10,12 +10,15 @@ type Config struct {
 	config.BaseConfig `mapstructure:",squash"`
 	ServingPort       string `mapstructure:"servingPort" envconfig:"SERVINGPORT" default:"8080"`
 	PublicBasePath    string `mapstructure:"publicBasePath" envconfig:"PUBLICBASEPATH" default:"/api/presentation/proof"`
-	CassandraHosts    string `mapstructure:"cassandraHosts" envconfig:"CASSANDRAHOSTS"`
-	CassandraUser     string `mapstructure:"cassandraUser" envconfig:"CASSANDRAUSER"`
-	CassandraPassword string `mapstructure:"cassandraPassword" envconfig:"CASSANDRAPASSWORD"`
-	Country           string `mapstructure:"country" envconfig:"COUNTRY"`
-	Region            string `mapstructure:"region" envconfig:"REGION"`
-	Migrations        struct {
+	Cassandra         struct {
+		Host     string `mapstructure:"host" envconfig:"HOST"`
+		KeySpace string `mapstructure:"keyspace" envconfig:"KEYSPACE"`
+		User     string `mapstructure:"user" envconfig:"USER"`
+		Password string `mapstructure:"password" envconfig:"PASSWORD"`
+	} `mapstructure:"cassandra" envconfig:"CASSANDRA"`
+	Country    string `mapstructure:"country" envconfig:"COUNTRY"`
+	Region     string `mapstructure:"region" envconfig:"REGION"`
+	Migrations struct {
 		Enabled bool          `mapstructure:"enabled" envconfig:"ENABLED" default:"true"`
 		Table   string        `mapstructure:"table" envconfig:"TABLE" default:"verification_schema_migration"`
 		Timeout time.Duration `mapstructure:"timeout" envconfig:"TIMEOUT" default:"2m"`
@@ -31,8 +34,8 @@ type Config struct {
 	SignerService struct {
 		PresentationVerifyUrl string `mapstructure:"presentationVerifyUrl" envconfig:"PRESENTATIONVERIFYURL"`
 		PresentationSignUrl   string `mapstructure:"presentationSignUrl" envconfig:"PRESENTATIONSIGNURL"`
-		SignerTopic           string `mapstructure:"signerTopic" envconfig:"SIGNERTOPIC"`
-	} `mapstructure:"signerService"`
+		SignerTopic           string `mapstructure:"signerTopic" envconfig:"TOPIC"`
+	} `mapstructure:"signerService" envconfig:"SIGNER"`
 	Topics struct {
 		Authorization       string `mapstructure:"authorization" envconfig:"AUTHORIZATION"`
 		AuthorizationReply  string `mapstructure:"authorizationReply" envconfig:"AUTHORIZATIONREPLY"`

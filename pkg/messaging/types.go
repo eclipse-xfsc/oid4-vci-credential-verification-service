@@ -1,7 +1,7 @@
 package messaging
 
 import (
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
 )
 
@@ -13,12 +13,13 @@ const (
 
 type PresentationAuthorizationCreationRequest struct {
 	common.Request
-	PresentationDefinition presentation.PresentationDefinition `json:"presentationDefinition"`
-	Ttl                    int                                 `json:"ttl"`
-	TenantUri              string                              `json:"tenant_uri"`
-	TargetUri              string                              `json:"target_uri"`
-	RequestObjectUri       string                              `json:"requestobject_uri"`
-	Nonce                  []byte                              `json:"nonce"`
+	DCQLQuery        presentation.DCQLQuery `json:"dcql_query"`
+	ClientID         string                 `json:"client_id"`
+	Ttl              int                    `json:"ttl"`
+	TenantUri        string                 `json:"tenant_uri"`
+	TargetUri        string                 `json:"target_uri"`
+	RequestObjectUri string                 `json:"requestobject_uri"`
+	Nonce            []byte                 `json:"nonce"`
 }
 
 type PresentationAuthorizationCreationReply struct {

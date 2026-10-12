@@ -9,12 +9,12 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/gin-gonic/gin"
-	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 	commonTypes "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
+	"github.com/gin-gonic/gin"
+	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 )
 
 const (
@@ -102,14 +102,10 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 		_ = ErrorResponse(ctx, RecordNotFoundError, err)
 		return
 	}
-	for _, pres := range res {
-		err = postResponse(pres, row, body, logger)
-
-		if err != nil {
-			_ = ErrorResponse(ctx, PostResponseError, err)
-			//TODO Retry?
-			return
-		}
+	err = postResponse(res, row, logger)
+	if err != nil {
+		_ = ErrorResponse(ctx, PostResponseError, err)
+		return
 	}
 
 	err = common.UpdateDbStatus(context, tenantId, string(model.PresentationTransmitted), id)
@@ -226,72 +222,66 @@ func HandleListProof(ctx *gin.Context, config *model.Config) {
 	}
 }
 
-func postResponse(vpToken []byte, row *model.VerificationEntry, proofModel model.ProofModel, logger logr.Logger) error {
-
-	formdata, err := getFormData(vpToken, row, proofModel, logger)
+func postResponse(vpToken presentation.VPToken, row *model.VerificationEntry, logger logr.Logger) error {
+	formdata, err := getFormData(vpToken, row)
 	if err != nil {
 		return err
 	}
-
 	rep, err := GetHttpClient().PostForm(row.ResponseUri, formdata)
-
 	if err != nil {
 		logger.Error(err, "Error during posting response", "responseUri", row.ResponseUri)
 		return err
 	}
-
-	if rep.StatusCode != 200 {
-		err = fmt.Errorf("response uri %s responded an error", row.ResponseUri)
-		b, er := io.ReadAll(rep.Body)
-		if er == nil {
-			err = errors.Join(err, errors.New(string(b)))
-		}
-		logger.Error(err, "")
-		return err
+	defer rep.Body.Close()
+	if rep.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(rep.Body)
+		return fmt.Errorf("response uri %s responded with %d: %s", row.ResponseUri, rep.StatusCode, string(body))
 	}
 	return nil
 }
 
-func getFormData(vpToken []byte, row *model.VerificationEntry, proofModel model.ProofModel, logger logr.Logger) (url.Values, error) {
+func getFormData(vpToken presentation.VPToken, row *model.VerificationEntry) (url.Values, error) {
 	if row == nil {
 		return nil, errors.New("row empty")
 	}
-
-	var descriptors []presentation.Description = make([]presentation.Description, 0)
-	for _, filter := range proofModel.Payload {
-		descriptors = append(descriptors, filter.Description)
-	}
-
-	submission := presentation.CreateSubmission(row.PresentationDefinition.Id, descriptors)
-
-	bytes, err := json.Marshal(submission)
-
-	if err != nil {
-		logger.Error(err, "created invalid submission")
+	if err := vpToken.ValidateAgainst(&row.DCQLQuery); err != nil {
 		return nil, err
 	}
-
+	encoded, err := vpToken.JSONString()
+	if err != nil {
+		return nil, err
+	}
 	formdata := url.Values{}
-	formdata.Add("vp_token", string(vpToken))
-	formdata.Add("presentation_submission", string(bytes))
+	formdata.Set("vp_token", encoded)
+	state, err := common.EncodeVerificationState(row.GroupId, row.RequestId)
+	if err != nil {
+		return nil, err
+	}
+	formdata.Set("state", state)
 	return formdata, nil
 }
 
-func signerServiceSignLdpJson(payload model.ProofModel, logger logr.Logger, config *model.Config) ([][]byte, error) {
+func signerServiceSignLdpJson(payload model.ProofModel, logger logr.Logger, config *model.Config) (presentation.VPToken, error) {
 	presentations, err := fromProofModelToPresentation(payload, logger)
 	if err != nil {
 		return nil, err
 	}
-	var res = make([][]byte, 0)
-
-	for _, pres := range presentations {
-		b, err := processPresentationData(err, pres, logger, config)
+	if len(presentations) != len(payload.Payload) {
+		return nil, errors.New("presentation/query count mismatch")
+	}
+	result := make(presentation.VPToken, len(presentations))
+	for i, pres := range presentations {
+		signed, err := processPresentationData(nil, pres, logger, config)
 		if err != nil {
 			return nil, err
 		}
-		res = append(res, b)
+		queryID := payload.Payload[i].Id
+		if queryID == "" {
+			return nil, errors.New("DCQL query id is required")
+		}
+		result[queryID] = append(result[queryID], json.RawMessage(signed))
 	}
-	return res, nil
+	return result, nil
 }
 
 func processPresentationData(err error, presentation map[string]interface{}, logger logr.Logger, config *model.Config) ([]byte, error) {

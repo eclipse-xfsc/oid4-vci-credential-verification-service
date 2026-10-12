@@ -12,8 +12,8 @@ import (
 	appCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"github.com/gocql/gocql"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
 )
 
 const presentationsTable = "ocm.presentations"
@@ -30,7 +30,7 @@ func scanEntries(iter connection.IterInterface) ([]model.VerificationEntry, erro
 			return nil, err
 		}
 		if len(b) > 0 {
-			if err = json.Unmarshal(b, &row.PresentationDefinition); err != nil {
+			if err = json.Unmarshal(b, &row.DCQLQuery); err != nil {
 				return nil, err
 			}
 		}
@@ -57,7 +57,7 @@ func getEntryByKey(ctx context.Context, tenantId, groupId, requestId string) (*m
 		return nil, errors.New("tenantId, groupId and requestId must not be empty")
 	}
 	partition := env.GetAccountPartition(groupId)
-	selectCols := `partition,region,country,tenantId,groupId,requestId,presentationDefinition,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId`
+	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId`
 	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`, selectCols, presentationsTable)
 	rows, err := scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
 	if err != nil {
@@ -84,7 +84,7 @@ func GetEntryFromDbByRequestId(ctx context.Context, tenantId, requestId string) 
 func GetEntriesFromDb(ctx context.Context, tenantId, groupId string) ([]model.VerificationEntry, error) {
 	env := appCommon.GetEnvironment()
 	partition := env.GetAccountPartition(groupId)
-	selectCols := `partition,region,country,tenantId,groupId,requestId,presentationDefinition,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId`
+	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId`
 	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=?`, selectCols, presentationsTable)
 	return scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
 }
@@ -94,9 +94,10 @@ type PresentationRequestOptions struct {
 	RequestId string `json:"requestId"`
 	GroupId   string `json:"groupId"`
 	Ttl       int    `json:"ttl"`
+	ClientId  string `json:"clientId"`
 }
 
-func AddPresentationDefinitonToDb(pd presentation.PresentationDefinition, options PresentationRequestOptions, ctx context.Context) error {
+func AddDCQLQueryToDb(pd presentation.DCQLQuery, options PresentationRequestOptions, ctx context.Context) error {
 	if options.TenantId == "" {
 		return errors.New("tenantId must not be empty")
 	}
@@ -116,8 +117,8 @@ func AddPresentationDefinitonToDb(pd presentation.PresentationDefinition, option
 	if _, err = rand.Read(nonce); err != nil {
 		return err
 	}
-	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,presentationDefinition,status,last_update_timestamp,nonce) VALUES(?,?,?,?,?,?,?,?,toTimestamp(now()),?) USING TTL ?`
-	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawStdEncoding.EncodeToString(nonce), options.Ttl).WithContext(ctx).Exec()
+	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,dcqlQuery,status,last_update_timestamp,nonce,clientId) VALUES(?,?,?,?,?,?,?,?,toTimestamp(now()),?,?) USING TTL ?`
+	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawURLEncoding.EncodeToString(nonce), options.ClientId, options.Ttl).WithContext(ctx).Exec()
 }
 
 func updateKey(ctx context.Context, tenantId, id string) (*model.VerificationEntry, error) {
@@ -169,10 +170,10 @@ func StoreRequest(ctx context.Context, requestId, tenantId, groupId string, requ
 	}
 	env := appCommon.GetEnvironment()
 	partition := env.GetAccountPartition(groupId)
-	b, err := json.Marshal(requestObject.PresentationDefinition)
+	b, err := json.Marshal(requestObject.DCQLQuery)
 	if err != nil {
 		return err
 	}
-	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,status,last_update_timestamp,presentationDefinition,redirectUri,nonce,responseUri,responseMode,responseType,clientId) VALUES(?,?,?,?,?,?,?,toTimestamp(now()),?,?,?,?,?,?,?)`
-	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId, model.PresentationRequested, base64.RawStdEncoding.EncodeToString(b), requestObject.RedirectUri, requestObject.Nonce, requestObject.ResponseUri, requestObject.ResponseMode, requestObject.ResponseType, requestObject.ClientID).WithContext(ctx).Exec()
+	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,status,last_update_timestamp,dcqlQuery,redirectUri,nonce,responseUri,responseMode,responseType,clientId) VALUES(?,?,?,?,?,?,?,toTimestamp(now()),?,?,?,?,?,?,?)`
+	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId, model.PresentationRequested, base64.RawStdEncoding.EncodeToString(b), requestObject.RedirectURI, requestObject.Nonce, requestObject.ResponseURI, requestObject.ResponseMode, requestObject.ResponseType, requestObject.ClientID).WithContext(ctx).Exec()
 }

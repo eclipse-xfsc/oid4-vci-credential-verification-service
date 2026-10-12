@@ -13,10 +13,10 @@ import (
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/types"
 	"github.com/gin-gonic/gin"
 	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
 	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/types"
 	"gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
 )
 
@@ -53,8 +53,14 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	if err != nil {
 		return "", err
 	}
+	if err := object.AuthorizationRequest.Validate(); err != nil {
+		return "", fmt.Errorf("invalid OID4VP request object: %w", err)
+	}
+	if clientId != object.ClientID {
+		return "", errors.New("client_id does not match request object")
+	}
 
-	if object.ResponseMode != types.DirectPost {
+	if object.ResponseMode != string(types.DirectPost) {
 		return "", errors.ErrUnsupported
 	}
 

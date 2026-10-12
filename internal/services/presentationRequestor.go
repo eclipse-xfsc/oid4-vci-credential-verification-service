@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/ssi/oid4vip/model/presentation"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 
 	"github.com/cloudevents/sdk-go/v2/event"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
@@ -115,17 +115,20 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			Path:   path + "/" + id,
 		}
 
-		tok := make(map[string]interface{})
-		tok["client_id"] = did
-		tok["response_uri"] = clientUrl.String()
-		tok["response_type"] = "vp_token"
-		tok["nonce"] = row.Nonce
-		tok["state"] = id
-		tok["response_mode"] = "direct_post"
-		tok["presentation_definition"] = row.PresentationDefinition
-		tok["client_id_scheme"] = "did"
+		authRequest := presentation.AuthorizationRequest{
+			ClientID:     row.ClientId,
+			ResponseURI:  clientUrl.String(),
+			ResponseType: "vp_token",
+			Nonce:        row.Nonce,
+			State:        id,
+			ResponseMode: "direct_post",
+			DCQLQuery:    &row.DCQLQuery,
+		}
+		if err := authRequest.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid OID4VP authorization request: %w", err)
+		}
 
-		pb, err := json.Marshal(tok)
+		pb, err := json.Marshal(authRequest)
 		if err != nil {
 			return nil, err
 		}
@@ -196,10 +199,13 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 			return nil, errors.New("problem during marshaling")
 		}
 
-		err = authorizationRequest.PresentationDefinition.CheckPresentationDefinition()
+		err = authorizationRequest.DCQLQuery.Validate()
 
 		if err != nil {
 			return requestor.AuthorizationReplyError(reply, err, "error during check presentation")
+		}
+		if _, err = presentation.ParseClientIdentifier(authorizationRequest.ClientID); err != nil {
+			return requestor.AuthorizationReplyError(reply, err, "invalid client_id")
 		}
 
 		state, err := common.EncodeVerificationState(authorizationRequest.GroupId, authorizationRequest.RequestId)
@@ -215,9 +221,10 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 			RequestId: authorizationRequest.RequestId,
 			GroupId:   authorizationRequest.GroupId,
 			Ttl:       authorizationRequest.Ttl,
+			ClientId:  authorizationRequest.ClientID,
 		}
 
-		err = common.AddPresentationDefinitonToDb(authorizationRequest.PresentationDefinition, requestOptions, ctx)
+		err = common.AddDCQLQueryToDb(authorizationRequest.DCQLQuery, requestOptions, ctx)
 
 		if err != nil {
 			return requestor.AuthorizationReplyError(reply, err, "error during db adding")
@@ -239,8 +246,14 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 	return requestor.AuthorizationReplyError(reply, errors.ErrUnsupported, "error in json marshalling")
 }
 
-func (requestor *PresentationRequestor) CreatePresentationRequest(definition presentation.PresentationDefinition, options common.PresentationRequestOptions, ctx context.Context) error {
-	return common.AddPresentationDefinitonToDb(definition, options, ctx)
+func (requestor *PresentationRequestor) CreatePresentationRequest(query presentation.DCQLQuery, options common.PresentationRequestOptions, ctx context.Context) error {
+	if err := query.Validate(); err != nil {
+		return err
+	}
+	if _, err := presentation.ParseClientIdentifier(options.ClientId); err != nil {
+		return fmt.Errorf("invalid client_id: %w", err)
+	}
+	return common.AddDCQLQueryToDb(query, options, ctx)
 }
 
 func (requestor *PresentationRequestor) AuthorizationReplyError(reply messaging.PresentationAuthorizationCreationReply, err error, message string) (*event.Event, error) {
@@ -293,14 +306,8 @@ func (requestor *PresentationRequestor) buildUri(request messaging.PresentationA
 		Path:   "/authorize",
 	}
 
-	clientUrl := url.URL{
-		Scheme: requestor.config.ExternalPresentation.ClientUrlSchema,
-		Host:   request.TenantUri,
-		Path:   CredentialApiGroup + DirectGroup + "/" + id,
-	}
-
 	query := authUrl.Query()
-	query.Add("client_id", clientUrl.String())
+	query.Add("client_id", request.ClientID)
 	query.Add("request_uri", requestObjectUrl.String())
 	authUrl.RawQuery = query.Encode()
 	return requestor.config.ExternalPresentation.ClientUrlSchema + "://" + request.TargetUri + authUrl.RequestURI()
