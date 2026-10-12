@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
+	"github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
-	"gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
 )
 
 func main() {

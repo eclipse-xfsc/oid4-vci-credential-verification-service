@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/cloudevents/sdk-go/v2/event"
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
+	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+	"github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/types"
 	"github.com/gin-gonic/gin"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
-	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	"gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
 )
 
 type AuthorizationHandler struct {

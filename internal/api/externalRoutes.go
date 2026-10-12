@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	core "github.com/eclipse-xfsc/microservice-core-go/pkg/server"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/middleware"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
@@ -14,7 +15,6 @@ import (
 	svcCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"github.com/gin-gonic/gin"
-	core "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
 )
 
 const (

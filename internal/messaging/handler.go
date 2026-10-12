@@ -1,8 +1,8 @@
 package messaging
 
 import (
+	"github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 )
 
 type EventHandler interface {

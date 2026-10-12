@@ -7,6 +7,9 @@ import (
 	"os"
 	"time"
 
+	conf "github.com/eclipse-xfsc/microservice-core-go/pkg/config"
+	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+	server "github.com/eclipse-xfsc/microservice-core-go/pkg/server"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/api"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
@@ -15,9 +18,6 @@ import (
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services"
 	"github.com/kelseyhightower/envconfig"
-	conf "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/config"
-	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	server "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/server"
 )
 
 var env *common.Environment

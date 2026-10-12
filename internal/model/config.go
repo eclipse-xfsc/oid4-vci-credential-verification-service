@@ -1,9 +1,10 @@
 package model
 
 import (
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
-	config "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/config"
 	"time"
+
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
+	config "github.com/eclipse-xfsc/microservice-core-go/pkg/config"
 )
 
 type Config struct {

@@ -12,7 +12,7 @@ import (
 
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/crypto/jwt"
+	jwt "github.com/eclipse-xfsc/ssi-jwt"
 )
 
 const HeaderContextKey = "headers"

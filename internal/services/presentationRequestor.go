@@ -9,17 +9,17 @@ import (
 	"strings"
 	"time"
 
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 
 	"github.com/cloudevents/sdk-go/v2/event"
+	msg "github.com/eclipse-xfsc/crypto-provider-service/v2/pkg/messaging"
+	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+	commonMessageTypes "github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/pkg/messaging"
 	"github.com/google/uuid"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
-	logr "gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
-	commonMessageTypes "gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/libraries/messaging/common"
-	msg "gitlab.eclipse.org/eclipse/xfsc/tsa/signer/pkg/messaging"
 )
 
 type PresentationRequestor struct {

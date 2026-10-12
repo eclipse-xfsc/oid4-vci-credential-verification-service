@@ -3,13 +3,14 @@ package services
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
-	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
-	"github.com/stretchr/testify/require"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/microservice/core/pkg/logr"
 	"io"
 	"os"
 	"testing"
+
+	"github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFromProofModelToPresentation(t *testing.T) {
