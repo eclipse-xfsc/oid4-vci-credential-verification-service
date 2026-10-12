@@ -21,7 +21,7 @@ The service itself stores each Request in a Cassandra DB, either for fullment a 
 
 ## Authorization Link Creation and Usage
 
-A [nats message](https://gitlab.eclipse.org/eclipse/xfsc/organisational-credential-manager-w-stack/credential-verification-service/-/blob/main/pkg/messaging/types.go?ref_type=heads#L14) is sent to the service together with a TTL and a presentation definition, which the service stores along with a request.jwt object. If the link is later on used, the request.jwt is delivered. When the TTL is exceeded, the record is deleted and the link then not more usable. 
+A [nats message](https://github.com/eclipse-xfsc/oid4-vci-credential-verification-service/blob/main/pkg/messaging/types.go) is sent to the service together with a TTL and a presentation definition, which the service stores along with a request.jwt object. If the link is later on used, the request.jwt is delivered. When the TTL is exceeded, the record is deleted and the link then not more usable. 
 
 ```mermaid
 sequenceDiagram

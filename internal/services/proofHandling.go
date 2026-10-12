@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	storageMessaging "github.com/eclipse-xfsc/credential-storage-service/pkg/messaging"
 	commonMessageTypes "github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
@@ -17,7 +18,6 @@ import (
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/types"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider"
 )
 
 // HandleProof receives an OID4VP 1.0 direct_post response. vp_token is a JSON

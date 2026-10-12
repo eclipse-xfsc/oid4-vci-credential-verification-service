@@ -19,7 +19,6 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/gin-swagger v1.6.0
 	github.com/swaggo/swag v1.16.4
-	gitlab.eclipse.org/eclipse/xfsc/libraries/messaging/cloudeventprovider v0.1.4
 )
 
 require (
