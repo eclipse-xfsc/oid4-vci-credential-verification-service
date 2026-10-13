@@ -10,6 +10,7 @@ import (
 	"net/url"
 
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+
 	commonTypes "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"

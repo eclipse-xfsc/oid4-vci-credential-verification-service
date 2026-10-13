@@ -2,6 +2,7 @@ package api
 
 import (
 	core "github.com/eclipse-xfsc/microservice-core-go/pkg/server"
+
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/middleware"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services"

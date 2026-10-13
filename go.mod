@@ -10,9 +10,9 @@ require (
 	github.com/eclipse-xfsc/microservice-core-go v1.1.2
 	github.com/eclipse-xfsc/nats-message-library v1.5.0
 	github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.2
-	github.com/eclipse-xfsc/ssi-jwt v1.2.1
 	github.com/gin-gonic/gin v1.10.0
 	github.com/gocql/gocql v1.6.0
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/sirupsen/logrus v1.9.4
@@ -38,8 +38,6 @@ require (
 	github.com/eapache/go-resiliency v1.6.0 // indirect
 	github.com/eapache/go-xerial-snappy v0.0.0-20230731223053-c322873962e3 // indirect
 	github.com/eapache/queue v1.1.0 // indirect
-	github.com/eclipse-xfsc/crypto-provider-core v1.4.1 // indirect
-	github.com/eclipse-xfsc/did-core v1.1.0 // indirect
 	github.com/eclipse/paho.golang v0.12.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect

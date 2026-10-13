@@ -2,6 +2,7 @@ package common
 
 import (
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/docs"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"

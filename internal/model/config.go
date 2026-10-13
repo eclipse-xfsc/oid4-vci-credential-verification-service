@@ -3,8 +3,9 @@ package model
 import (
 	"time"
 
-	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	config "github.com/eclipse-xfsc/microservice-core-go/pkg/config"
+
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 )
 
 type Config struct {
@@ -37,15 +38,11 @@ type Config struct {
 		PresentationSignUrl   string `mapstructure:"presentationSignUrl" envconfig:"PRESENTATIONSIGNURL"`
 		SignerTopic           string `mapstructure:"signerTopic" envconfig:"TOPIC"`
 	} `mapstructure:"signerService" envconfig:"SIGNER"`
-	Topics struct {
-		Authorization       string `mapstructure:"authorization" envconfig:"AUTHORIZATION"`
-		AuthorizationReply  string `mapstructure:"authorizationReply" envconfig:"AUTHORIZATIONREPLY"`
-		ProofNotify         string `mapstructure:"proofNotify" envconfig:"PROOFNOTIFY"`
-		PresentationRequest string `mapstructure:"presentationRequest" envconfig:"PRESENTATINREQUEST"`
-		StorageRequest      string `mapstructure:"storageRequest" envconfig:"STORAGEREQUEST"`
-	} `mapstructure:"topics"`
-	Messaging struct {
-		Protocol cloudeventprovider.ProtocolType `mapstructure:"protocol" envconfig:"PROTOCOL" default:"nats"`
-		Nats     cloudeventprovider.NatsConfig   `mapstructure:"nats" envconfig:"NATS"`
-	} `mapstructure:"messaging"`
+	Authorization       string                          `mapstructure:"authorization" envconfig:"AUTHORIZATION"`
+	AuthorizationReply  string                          `mapstructure:"authorizationReply" envconfig:"AUTHORIZATIONREPLY"`
+	ProofNotify         string                          `mapstructure:"proofNotify" envconfig:"PROOFNOTIFY"`
+	PresentationRequest string                          `mapstructure:"presentationRequest" envconfig:"PRESENTATIONREQUEST"`
+	StorageRequest      string                          `mapstructure:"storageRequest" envconfig:"STORAGE_TOPIC"`
+	Protocol            cloudeventprovider.ProtocolType `mapstructure:"protocol" envconfig:"PROTOCOL" default:"nats"`
+	Nats                cloudeventprovider.NatsConfig   `mapstructure:"nats" envconfig:"NATS"`
 }

@@ -10,6 +10,7 @@ import (
 	conf "github.com/eclipse-xfsc/microservice-core-go/pkg/config"
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
 	server "github.com/eclipse-xfsc/microservice-core-go/pkg/server"
+
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/api"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/connection"
@@ -44,14 +45,6 @@ func connectDb() error {
 // @host			localhost:8080
 
 func main() {
-	// XFSC injection emits provider variables with the service prefix. The
-	// NATS configuration is nested under messaging.nats, while the operator
-	// supplies NATS_URL. Bridge this mismatch before loading configuration.
-	if injected, ok := os.LookupEnv("CREDENTIALVERIFICATION_NATS_URL"); ok {
-		if _, explicitlyConfigured := os.LookupEnv("CREDENTIALVERIFICATION_MESSAGING_NATS_URL"); !explicitlyConfigured {
-			_ = os.Setenv("CREDENTIALVERIFICATION_MESSAGING_NATS_URL", injected)
-		}
-	}
 	// The DID library expects the unprefixed variable. Preserve an explicit
 	// DID_RESOLVER override, otherwise use the injected provider output.
 	if injected, ok := os.LookupEnv("CREDENTIALVERIFICATION_DID_RESOLVER"); ok {

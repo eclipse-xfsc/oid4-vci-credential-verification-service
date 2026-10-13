@@ -9,9 +9,10 @@ import (
 	"net/url"
 	"time"
 
+	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+
 	"github.com/cloudevents/sdk-go/v2/event"
 	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
-	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
 	"github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	serviceCommon "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
@@ -175,14 +176,14 @@ func (handler *AuthorizationHandler) Initialize(config *model.Config, logger log
 	handler.logger = logger
 	handler.config = config
 
-	if config.Topics.Authorization == "" {
+	if config.Authorization == "" {
 		return errors.New("Invalid Subject for Nats.")
 	}
 	client, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: cloudeventprovider.ProtocolTypeNats, Settings: cloudeventprovider.NatsConfig{
-		Url:          config.Messaging.Nats.Url,
-		QueueGroup:   config.Messaging.Nats.QueueGroup,
+		Url:          config.Nats.Url,
+		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
-	}}, cloudeventprovider.ConnectionTypeSub, config.Topics.Authorization)
+	}}, cloudeventprovider.ConnectionTypeSub, config.Authorization)
 
 	if err != nil {
 		logger.Logger.Error(err, "Error during message creation")
@@ -192,10 +193,10 @@ func (handler *AuthorizationHandler) Initialize(config *model.Config, logger log
 	handler.client = client
 
 	client2, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: cloudeventprovider.ProtocolTypeNats, Settings: cloudeventprovider.NatsConfig{
-		Url:          config.Messaging.Nats.Url,
-		QueueGroup:   config.Messaging.Nats.QueueGroup,
+		Url:          config.Nats.Url,
+		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
-	}}, cloudeventprovider.ConnectionTypePub, config.Topics.AuthorizationReply)
+	}}, cloudeventprovider.ConnectionTypePub, config.AuthorizationReply)
 
 	if err != nil {
 		logger.Logger.Error(err, "Error during message creation")
@@ -250,7 +251,7 @@ func (handler *AuthorizationHandler) receive(event event.Event) {
 			return
 		}
 
-		e, err := cloudeventprovider.NewEvent(handler.config.Topics.AuthorizationReply, messaging.PresentationAuthorizationRemoteType, b)
+		e, err := cloudeventprovider.NewEvent(handler.config.AuthorizationReply, messaging.PresentationAuthorizationRemoteType, b)
 		if err != nil {
 			handler.logger.Error(err, "Error during object publication handling")
 		}

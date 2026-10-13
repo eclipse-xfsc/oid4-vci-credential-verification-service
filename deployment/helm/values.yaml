@@ -13,7 +13,7 @@ image:
 # ResourceProviders and Cassandra is provisioned through the ResourceClaim.
 podAnnotations:
   inject.xfsc.io/enabled: "false"
-  inject.xfsc.io/needs: "nats,cassandra,signer,didresolver"
+  inject.xfsc.io/needs: "nats,cassandra,signer,didresolver,storage"
   inject.xfsc.io/env-prefix: "CREDENTIALVERIFICATION"
 
 resourceProvider:
@@ -50,7 +50,7 @@ security:
   runAsGid: 1000
 
 ingress:
-  enabled: false
+  enabled: true
   annotations:
     nginx.ingress.kubernetes.io/configuration-snippet: |
       proxy_set_header X-DID did:web:cloud-wallet.xfsc.dev;

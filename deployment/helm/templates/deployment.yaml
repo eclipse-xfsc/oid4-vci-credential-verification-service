@@ -57,22 +57,20 @@ spec:
               value: {{ .Values.config.country | quote }}
             - name: CREDENTIALVERIFICATION_REGION
               value: {{ .Values.config.region | quote }}
-            - name: CREDENTIALVERIFICATION_MESSAGING_PROTOCOL
+            - name: CREDENTIALVERIFICATION_PROTOCOL
               value: {{ .Values.config.messaging.protocol | quote }}
-            - name: CREDENTIALVERIFICATION_MESSAGING_NATS_QUEUEGROUP
+            - name: CREDENTIALVERIFICATION_NATS_QUEUE_GROUP
               value: {{ .Values.config.messaging.nats.queueGroup | quote }}
-            - name: CREDENTIALVERIFICATION_MESSAGING_NATS_TIMEOUTINSEC
+            - name: CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT
               value: {{ .Values.config.messaging.nats.timeoutInSec | quote }}
-            - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATION
+            - name: CREDENTIALVERIFICATION_AUTHORIZATION
               value: {{ .Values.config.topics.authorization | quote }}
-            - name: CREDENTIALVERIFICATION_TOPICS_AUTHORIZATIONREPLY
+            - name: CREDENTIALVERIFICATION_AUTHORIZATIONREPLY
               value: {{ .Values.config.topics.authorizationReply | quote }}
-            - name: CREDENTIALVERIFICATION_TOPICS_PROOFNOTIFY
+            - name: CREDENTIALVERIFICATION_PROOFNOTIFY
               value: {{ .Values.config.topics.proofNotify | quote }}
-            - name: CREDENTIALVERIFICATION_TOPICS_PRESENTATINREQUEST
+            - name: CREDENTIALVERIFICATION_PRESENTATIONREQUEST
               value: {{ .Values.config.topics.presentationRequest | quote }}
-            - name: CREDENTIALVERIFICATION_TOPICS_STORAGEREQUEST
-              value: {{ .Values.config.topics.storageRequest | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED
               value: {{ .Values.config.externalPresentation.enabled | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_AUTHORIZEENDPOINT
@@ -90,7 +88,7 @@ spec:
 
             {{- if not $injectionEnabled }}
             # Standalone deployment: resolve all dependencies from values.yaml.
-            - name: CREDENTIALVERIFICATION_MESSAGING_NATS_URL
+            - name: CREDENTIALVERIFICATION_NATS_URL
               value: {{ .Values.config.messaging.nats.url | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_HOST
               value: {{ .Values.config.cassandra.host | quote }}
@@ -109,6 +107,8 @@ spec:
               value: {{ .Values.config.signer.presentationVerifyUrl | quote }}
             - name: CREDENTIALVERIFICATION_SIGNER_TOPIC
               value: {{ .Values.config.signer.topic | quote }}
+            - name: CREDENTIALVERIFICATION_STORAGE_TOPIC
+              value: {{ .Values.config.topics.storageRequest | quote }}
             - name: DID_RESOLVER
               value: {{ .Values.config.didResolver | quote }}
             {{- else }}

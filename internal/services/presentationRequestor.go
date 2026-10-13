@@ -9,12 +9,13 @@ import (
 	"strings"
 	"time"
 
-	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 
-	"github.com/cloudevents/sdk-go/v2/event"
-	msg "github.com/eclipse-xfsc/crypto-provider-service/v2/pkg/messaging"
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
+
+	"github.com/cloudevents/sdk-go/v2/event"
+	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
+	msg "github.com/eclipse-xfsc/crypto-provider-service/v2/pkg/messaging"
 	commonMessageTypes "github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
@@ -41,18 +42,18 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 	requestor.logger = logger
 	requestor.config = config
 
-	if config.Topics.PresentationRequest == "" {
+	if config.PresentationRequest == "" {
 		return errors.New("Invalid Subject for Nats.")
 	}
 
-	requestor.presentationRequestTopic = config.Topics.PresentationRequest
-	requestor.storagePubTopic = config.Topics.StorageRequest
+	requestor.presentationRequestTopic = config.PresentationRequest
+	requestor.storagePubTopic = config.StorageRequest
 
 	client, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: cloudeventprovider.ProtocolTypeNats, Settings: cloudeventprovider.NatsConfig{
-		Url:          config.Messaging.Nats.Url,
-		QueueGroup:   config.Messaging.Nats.QueueGroup,
+		Url:          config.Nats.Url,
+		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
-	}}, cloudeventprovider.Rep, config.Topics.PresentationRequest)
+	}}, cloudeventprovider.Rep, config.PresentationRequest)
 
 	if err != nil {
 		logger.Error(err, "Error during message creation")
@@ -61,11 +62,11 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 
 	requestor.client = client
 
-	client2, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: config.Messaging.Protocol, Settings: cloudeventprovider.NatsConfig{
-		Url:          config.Messaging.Nats.Url,
-		QueueGroup:   config.Messaging.Nats.QueueGroup,
+	client2, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: config.Protocol, Settings: cloudeventprovider.NatsConfig{
+		Url:          config.Nats.Url,
+		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
-	}}, cloudeventprovider.Pub, config.Topics.ProofNotify)
+	}}, cloudeventprovider.Pub, config.ProofNotify)
 
 	if err != nil {
 		logger.Error(err, "Error during message creation")
@@ -74,11 +75,11 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 
 	requestor.notifyClient = client2
 
-	client3, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: config.Messaging.Protocol, Settings: cloudeventprovider.NatsConfig{
-		Url:          config.Messaging.Nats.Url,
-		QueueGroup:   config.Messaging.Nats.QueueGroup,
+	client3, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: config.Protocol, Settings: cloudeventprovider.NatsConfig{
+		Url:          config.Nats.Url,
+		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
-	}}, cloudeventprovider.Pub, config.Topics.StorageRequest)
+	}}, cloudeventprovider.Pub, config.StorageRequest)
 
 	if err != nil {
 		logger.Error(err, "Error during message creation")
@@ -87,9 +88,9 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 
 	requestor.storageClient = client3
 
-	client4, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: config.Messaging.Protocol, Settings: cloudeventprovider.NatsConfig{
-		Url:          config.Messaging.Nats.Url,
-		QueueGroup:   config.Messaging.Nats.QueueGroup,
+	client4, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: config.Protocol, Settings: cloudeventprovider.NatsConfig{
+		Url:          config.Nats.Url,
+		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
 	}}, cloudeventprovider.Req, config.SignerService.SignerTopic)
 

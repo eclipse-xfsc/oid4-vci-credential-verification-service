@@ -12,7 +12,7 @@ import (
 
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
-	jwt "github.com/eclipse-xfsc/ssi-jwt"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const HeaderContextKey = "headers"
