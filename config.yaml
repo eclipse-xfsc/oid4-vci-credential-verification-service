@@ -25,3 +25,6 @@ messaging:
     url: http://localhost:4222
     queueGroup: credential-verification-service #optional
     timeoutInSec: 10 #optional
+
+# DIRECT-mode Credential Storage base URL used for DCQL matching.
+storageServiceUrl: http://localhost:8081

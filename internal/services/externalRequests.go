@@ -96,18 +96,21 @@ func handleSuccessfulResponse(resp *http.Response) (*presentation.RequestObject,
 		return nil, errors.Join(errors.New("could not parse response body"), err)
 	}
 
-	tokenString := strings.Replace(string(body), "\"", "", -1)
+	tokenString := strings.TrimSpace(string(body))
 
 	//Potentially here should be checked what client_id_scheme is used. Assumption here: DID is used, DID is in the kid referenced.
 	//In the future here must be check if something else than DID is used by opening the token before signature check, but spec is still too unstable for big evals
 
-	token, err := jwt.Parse(tokenString)
+	token, _, err := new(jwt.Parser).ParseUnverified(tokenString, jwt.MapClaims{})
 
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("error verifying token %s", tokenString), err)
+		return nil, errors.Join(errors.New("error parsing request object JWT"), err)
 	}
+	// Parsing is deliberately separated from trust. The request object MUST be
+	// signature-verified against trusted client key material before this flow is
+	// enabled in production. See README Security / Request Object Verification.
 
-	jsonTok, err := json.Marshal(token)
+	jsonTok, err := json.Marshal(token.Claims)
 
 	if err != nil {
 		return nil, errors.Join(errors.New("error marshalling token json"), err)

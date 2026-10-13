@@ -145,5 +145,5 @@ func JwtResponse(c *gin.Context, requestor *services.PresentationRequestor, path
 		services.ErrorResponse(c, "Request object fetching failed.", err)
 	}
 	c.Header("Content-Type", "application/jwt")
-	c.JSON(200, string(str))
+	c.Data(http.StatusOK, "application/jwt", str)
 }

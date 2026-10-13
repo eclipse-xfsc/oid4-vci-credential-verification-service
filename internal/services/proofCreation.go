@@ -120,6 +120,70 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 	return
 }
 
+// HandleFulfillProofById resolves matching credentials from Credential Storage,
+// creates/signs the VP token and submits it to the external verifier. This is
+// the holder-side execution step and must only be called after the application
+// has authorized disclosure.
+func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
+	id := ctx.Param("id")
+	tenantID := ctx.Param("tenantId")
+	logger := commonTypes.GetEnvironment().GetLogger()
+
+	row, err := common.GetEntryFromDb(ctx.Request.Context(), tenantID, id)
+	if err != nil {
+		ErrorResponse(ctx, RecordNotFoundError, err)
+		return
+	}
+
+	var request model.FulfillPresentationRequest
+	if err := ctx.ShouldBindJSON(&request); err != nil {
+		ErrorResponse(ctx, BodyError, err)
+		return
+	}
+	if request.HolderDid == "" || request.SignKey == "" {
+		ErrorResponse(ctx, BodyError, errors.New("holderDid and signKey are required"))
+		return
+	}
+	if request.SignNamespace == "" {
+		request.SignNamespace = tenantID
+	}
+	if request.SignGroup == "" {
+		request.SignGroup = row.GroupId
+	}
+
+	groups, err := resolveCredentials(ctx.Request.Context(), config, row)
+	if err != nil {
+		ErrorResponse(ctx, "Credential selection failed", err)
+		return
+	}
+
+	proof := model.ProofModel{
+		Payload:       groups,
+		SignNamespace: request.SignNamespace,
+		SignKey:       request.SignKey,
+		SignGroup:     request.SignGroup,
+		HolderDid:     request.HolderDid,
+	}
+	vpToken, err := signerServiceSignLdpJson(proof, logger, config)
+	if err != nil {
+		ErrorResponse(ctx, SignError, err)
+		return
+	}
+	if err := vpToken.ValidateAgainst(&row.DCQLQuery); err != nil {
+		ErrorResponse(ctx, "DCQL validation failed", err)
+		return
+	}
+	if err := postResponse(vpToken, row, logger); err != nil {
+		ErrorResponse(ctx, PostResponseError, err)
+		return
+	}
+	if err := common.UpdateDbStatus(ctx.Request.Context(), tenantID, string(model.PresentationTransmitted), id); err != nil {
+		ErrorResponse(ctx, TransmitError, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": model.PresentationTransmitted})
+}
+
 // HandleGetProofRequestById godoc
 // @Summary Retrieves a proof request by its ID
 // @Description Retrieves a proof request by its ID
@@ -234,7 +298,7 @@ func postResponse(vpToken presentation.VPToken, row *model.VerificationEntry, lo
 		return err
 	}
 	defer rep.Body.Close()
-	if rep.StatusCode != http.StatusOK {
+	if rep.StatusCode < http.StatusOK || rep.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(rep.Body)
 		return fmt.Errorf("response uri %s responded with %d: %s", row.ResponseUri, rep.StatusCode, string(body))
 	}

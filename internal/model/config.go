@@ -43,6 +43,7 @@ type Config struct {
 	ProofNotify         string                          `mapstructure:"proofNotify" envconfig:"PROOFNOTIFY"`
 	PresentationRequest string                          `mapstructure:"presentationRequest" envconfig:"PRESENTATIONREQUEST"`
 	StorageRequest      string                          `mapstructure:"storageRequest" envconfig:"STORAGE_TOPIC"`
+	StorageServiceURL   string                          `mapstructure:"storageServiceUrl" envconfig:"STORAGE_URL"`
 	Protocol            cloudeventprovider.ProtocolType `mapstructure:"protocol" envconfig:"PROTOCOL" default:"nats"`
 	Nats                cloudeventprovider.NatsConfig   `mapstructure:"nats" envconfig:"NATS"`
 }

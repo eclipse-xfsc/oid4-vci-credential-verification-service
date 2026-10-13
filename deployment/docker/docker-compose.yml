@@ -136,19 +136,19 @@ services:
       DID_RESOLVER: ${DID_RESOLVER:-http://resolver:8080/1.0/identifiers/}
     ports: ["127.0.0.1:8086:8080"]
 
-  playground:
-    build: ./playground
-    depends_on:
-      nats: {condition: service_healthy}
-      verification: {condition: service_started}
-    environment:
-      NATS_URL: nats://nats:4222
-      VERIFICATION_URL: http://verification:8080
-      PUBLIC_VERIFICATION_URL: http://localhost:8086
-      PUBLIC_PLAYGROUND_URL: http://localhost:8090
-      NATS_AUTHORIZATION_SUBJECT: presentation.authorisation
-      NATS_PRESENTATION_SUBJECT: request
-    ports: ["127.0.0.1:8090:8090"]
+  # playground:
+  #   build: ./playground
+  #   depends_on:
+  #     nats: {condition: service_healthy}
+  #     verification: {condition: service_started}
+  #   environment:
+  #     NATS_URL: nats://nats:4222
+  #     VERIFICATION_URL: http://verification:8080
+  #     PUBLIC_VERIFICATION_URL: http://localhost:8086
+  #     PUBLIC_PLAYGROUND_URL: http://localhost:8090
+  #     NATS_AUTHORIZATION_SUBJECT: presentation.authorisation
+  #     NATS_PRESENTATION_SUBJECT: request
+  #   ports: ["127.0.0.1:8090:8090"]
 
 volumes:
   cassandra-data:

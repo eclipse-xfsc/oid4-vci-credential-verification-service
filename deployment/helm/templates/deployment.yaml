@@ -90,6 +90,8 @@ spec:
             # Standalone deployment: resolve all dependencies from values.yaml.
             - name: CREDENTIALVERIFICATION_NATS_URL
               value: {{ .Values.config.messaging.nats.url | quote }}
+            - name: CREDENTIALVERIFICATION_STORAGE_URL
+              value: {{ .Values.config.storageServiceUrl | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_HOST
               value: {{ .Values.config.cassandra.host | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_KEYSPACE

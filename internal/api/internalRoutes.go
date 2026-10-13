@@ -32,6 +32,12 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 			services.HandleCreateProofById(ctx, config)
 		})
 
+		// Holder-side fulfillment: resolve credentials from Storage using the
+		// persisted DCQL snapshot, sign the VP and direct_post it to the verifier.
+		pR.POST("/proof/:id/fulfill", func(ctx *gin.Context) {
+			services.HandleFulfillProofById(ctx, config)
+		})
+
 		//Completes and proof request by signing and posting it
 		pR.POST("/proof/request/:id", func(ctx *gin.Context) {
 			services.HandleCreateProofByRequestId(ctx, config)
