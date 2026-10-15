@@ -70,6 +70,7 @@ ingress:
         - cloud-wallet.xfsc.dev
 
 config:
+  isDev: false
   migrations:
     enabled: true
     table: verification_schema_migration
@@ -95,8 +96,9 @@ config:
 
   externalPresentation:
     enabled: true
-    authorizeEndpoint: credential-verification-service.default.svc.cluster.local:8080/v1/tenants/tenant_space/presentation/
+    authorizeEndpoint: https://holder-application.example/consent
     requestObjectPolicy: ""
+    credentialSelectionPolicy: ""
     clientIdPolicy: ""
     clientUrlSchema: https
 

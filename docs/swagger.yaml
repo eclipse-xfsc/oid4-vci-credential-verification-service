@@ -1,20 +1,448 @@
+swagger: '2.0'
+info:
+  description: Service for handling credentials proofs (presentations)
+  title: Credential verification service API
+  contact: {}
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  version: '1.0'
+host: localhost:8080
+paths:
+  /v1/tenants/{tenantId}/internal/list/proofs/{groupId}:
+    get:
+      description: Lists proofs for a group
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      tags:
+      - internal
+      summary: Lists proofs for a group
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Group ID
+        name: groupId
+        in: path
+        required: true
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/model.VerificationEntry'
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/internal/proofs/proof/request/{id}:
+    get:
+      description: Retrieves a proof request by its request ID
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      tags:
+      - internal
+      summary: Retrieves a proof request by its request ID
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof RequestID
+        name: id
+        in: path
+        required: true
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/model.VerificationEntry'
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+    post:
+      description: Completes and proof request by signing and posting it
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      tags:
+      - internal
+      summary: Completes and proof request by signing and posting it
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof RequestID
+        name: id
+        in: path
+        required: true
+      - description: Proof Model
+        name: body
+        in: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.ProofModel'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/internal/proofs/proof/{id}:
+    get:
+      description: Retrieves a proof request by its ID
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      tags:
+      - internal
+      summary: Retrieves a proof request by its ID
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof ID
+        name: id
+        in: path
+        required: true
+      responses:
+        '200':
+          description: OK
+          schema:
+            $ref: '#/definitions/model.VerificationEntry'
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+    post:
+      description: Completes and proof request by signing and posting it
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      tags:
+      - internal
+      summary: Completes and proof request by signing and posting it
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof ID
+        name: id
+        in: path
+        required: true
+      - description: Proof Model
+        name: body
+        in: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.ProofModel'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/internal/proofs/proof/{id}/assign/{groupId}:
+    put:
+      description: Assigns record to account
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      tags:
+      - internal
+      summary: Assigns record to account
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof ID
+        name: id
+        in: path
+        required: true
+      - type: string
+        description: Group ID
+        name: groupId
+        in: path
+        required: true
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/internal/proofs/proof/{id}/fulfill:
+    post:
+      tags:
+      - internal
+      summary: Fulfill external OID4VP request from Credential Storage
+      description: Authorized Holder fulfillment. Resolves persisted DCQL via Storage,
+        applies selection policy, signs presentations and direct_posts to external
+        verifier.
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        type: string
+      - name: id
+        in: path
+        required: true
+        type: string
+      - name: body
+        in: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.FulfillPresentationRequest'
+      responses:
+        '200':
+          description: Presentation transmitted
+        '400':
+          description: Invalid request
+        '409':
+          description: Already processing/completed
+        '500':
+          description: Failure
+  /v1/tenants/{tenantId}/presentation/authorize:
+    get:
+      description: Handles the authorization request by checking the client_id and
+        request_uri parameters, and then handling the request object
+      tags:
+      - external
+      summary: Handles the authorization request
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Client ID
+        name: client_id
+        in: query
+        required: true
+      - type: string
+        description: Request URI
+        name: request_uri
+        in: query
+        required: true
+      - type: string
+        description: Auth URL
+        name: authUrl
+        in: query
+      responses:
+        '302':
+          description: Found
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/presentation/proof/{id}:
+    post:
+      description: Handles the proof request by checking the content type and form
+        data, and then processing the presentations
+      consumes:
+      - application/x-www-form-urlencoded
+      produces:
+      - application/json
+      tags:
+      - external
+      summary: Handles the proof request
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof ID
+        name: id
+        in: path
+        required: true
+      - type: string
+        description: The presentation token
+        name: vp_token
+        in: formData
+        required: true
+      - type: string
+        description: The presentation submission
+        name: state
+        in: formData
+        required: true
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/presentation/proof/{id}/request-object/request.jwt:
+    get:
+      description: Responds with a request object by fetching the request object and
+        setting it as fetched
+      produces:
+      - application/jwt
+      tags:
+      - external
+      summary: Responds with a request object
+      parameters:
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: path
+        required: true
+      - type: string
+        description: Proof ID
+        name: id
+        in: path
+        required: true
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: string
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+  /v1/tenants/{tenantId}/presentation/request:
+    get:
+      description: Handles the request for presentation by creating a presentation
+        request with the provided parameters
+      produces:
+      - application/jwt
+      tags:
+      - external
+      summary: Handles the request for presentation
+      parameters:
+      - name: tenantId
+        in: path
+        required: true
+        type: string
+        description: Tenant ID
+      - type: string
+        description: Tenant ID
+        name: tenantId
+        in: query
+        required: true
+      - type: string
+        description: Request ID
+        name: requestId
+        in: query
+        required: true
+      - type: string
+        description: Group ID
+        name: groupId
+        in: query
+        required: true
+      - type: integer
+        description: TTL
+        name: ttl
+        in: query
+      - type: string
+        description: DCQL query base64url encoded
+        name: dcqlQuery
+        in: query
+        required: true
+      responses:
+        '200':
+          description: OK
+          schema:
+            type: string
+        '400':
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
+        '500':
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/services.ServerErrorResponse'
 definitions:
   model.ProofModel:
+    type: object
     properties:
       holderDid:
         type: string
       payload:
+        type: array
         items:
           $ref: '#/definitions/presentation.FilterResult'
-        type: array
       signGroup:
         type: string
       signKey:
         type: string
       signNamespace:
         type: string
-    type: object
   model.VerificationEntry:
+    type: object
     properties:
       clientId:
         type: string
@@ -29,8 +457,8 @@ definitions:
       nonce:
         type: string
       presentation:
-        items: {}
         type: array
+        items: {}
       dcqlQuery:
         $ref: '#/definitions/presentation.PresentationDefinition'
       redirectUri:
@@ -47,30 +475,34 @@ definitions:
         type: string
       state:
         type: string
-    type: object
+      authorizationState:
+        type: string
+        description: Original state supplied by external verifier (distinct from internal
+          status)
   presentation.Alg:
+    type: string
     enum:
     - EdDSA
     - ES256
     - PS256
-    type: string
     x-enum-varnames:
     - EDDSA
     - ES256
     - PS256
   presentation.Constraints:
+    type: object
     properties:
       fields:
         description: The constraints object MAY contain a fields property
+        type: array
         items:
           $ref: '#/definitions/presentation.Field'
-        type: array
       limit_disclosure:
+        description: The constraints object MAY contain a limit_disclosure property
         allOf:
         - $ref: '#/definitions/presentation.Disclosure'
-        description: The constraints object MAY contain a limit_disclosure property
-    type: object
   presentation.Description:
+    type: object
     properties:
       format:
         type: string
@@ -80,21 +512,21 @@ definitions:
         type: string
       purpose:
         type: string
-    type: object
   presentation.Disclosure:
+    type: string
     enum:
     - required
     - preferred
-    type: string
     x-enum-varnames:
     - Required
     - Preferred
   presentation.Field:
+    type: object
     properties:
       filter:
+        description: Optional Field
         allOf:
         - $ref: '#/definitions/presentation.Filter'
-        description: Optional Field
       id:
         description: Optional Field
         type: string
@@ -103,29 +535,29 @@ definitions:
         type: string
       path:
         description: Mandatory Field
+        type: array
         items:
           type: string
-        type: array
       purpose:
         description: Optional Field
         type: string
-    type: object
   presentation.Filter:
+    type: object
     properties:
       pattern:
         type: string
       type:
         type: string
-    type: object
   presentation.FilterResult:
+    type: object
     properties:
       credentials:
-        additionalProperties: true
         type: object
+        additionalProperties: true
       description:
         $ref: '#/definitions/presentation.Description'
-    type: object
   presentation.Format:
+    type: object
     properties:
       jwt:
         $ref: '#/definitions/presentation.FormatSpecification'
@@ -141,75 +573,75 @@ definitions:
         $ref: '#/definitions/presentation.FormatSpecification'
       verifiable-credential+sd-jwt:
         $ref: '#/definitions/presentation.FormatSpecification'
-    type: object
   presentation.FormatSpecification:
+    type: object
     properties:
       alg:
+        type: array
         items:
           $ref: '#/definitions/presentation.Alg'
-        type: array
       proof_type:
+        type: array
         items:
           $ref: '#/definitions/presentation.ProofType'
-        type: array
-    type: object
   presentation.InputDescriptor:
+    type: object
     properties:
       constraints:
         $ref: '#/definitions/presentation.Constraints'
       format:
         $ref: '#/definitions/presentation.Format'
       group:
+        type: array
         items:
           type: string
-        type: array
       id:
         type: string
       name:
         type: string
       purpose:
         type: string
-    type: object
   presentation.PresentationDefinition:
+    type: object
     properties:
       format:
         $ref: '#/definitions/presentation.Format'
       id:
         type: string
       input_descriptors:
+        type: array
         items:
           $ref: '#/definitions/presentation.InputDescriptor'
-        type: array
       name:
         type: string
       purpose:
         type: string
       submission_requirements:
+        type: array
         items:
           $ref: '#/definitions/presentation.SubmissionRequirement'
-        type: array
-    type: object
   presentation.ProofType:
+    type: string
     enum:
     - JsonWebSignature2020
     - Ed25519Signature2018
     - EcdsaSecp256k1Signature2019
     - RsaSignature2018
-    type: string
     x-enum-varnames:
     - JsonWebSignature2020
     - Ed25519Signature2018
     - EcdsaSecp256k1Signature2019
     - RsaSignature2018
   presentation.Rule:
+    type: string
     enum:
     - all
     - pick
-    type: string
     x-enum-varnames:
     - All
     - Pick
   presentation.SubmissionRequirement:
+    type: object
     properties:
       from:
         type: string
@@ -219,396 +651,22 @@ definitions:
         type: string
       rule:
         $ref: '#/definitions/presentation.Rule'
-    type: object
   services.ServerErrorResponse:
+    type: object
     properties:
       message:
         type: string
+  model.FulfillPresentationRequest:
     type: object
-host: localhost:8080
-info:
-  contact: {}
-  description: Service for handling credentials proofs (presentations)
-  license:
-    name: Apache 2.0
-    url: http://www.apache.org/licenses/LICENSE-2.0.html
-  title: Credential verification service API
-  version: "1.0"
-paths:
-  /internal/list/proofs/{groupId}:
-    get:
-      consumes:
-      - application/json
-      description: Lists proofs for a group
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
+    required:
+    - holderDid
+    - signKey
+    properties:
+      holderDid:
         type: string
-      - description: Group ID
-        in: path
-        name: groupId
-        required: true
+      signNamespace:
         type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.VerificationEntry'
-            type: array
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Lists proofs for a group
-      tags:
-      - internal
-  /internal/proofs/proof/{id}:
-    get:
-      consumes:
-      - application/json
-      description: Retrieves a proof request by its ID
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
+      signGroup:
         type: string
-      - description: Proof ID
-        in: path
-        name: id
-        required: true
+      signKey:
         type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.VerificationEntry'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Retrieves a proof request by its ID
-      tags:
-      - internal
-    post:
-      consumes:
-      - application/json
-      description: Completes and proof request by signing and posting it
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Proof ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Proof Model
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/model.ProofModel'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Completes and proof request by signing and posting it
-      tags:
-      - internal
-  /internal/proofs/proof/{id}/assign/{groupId}:
-    put:
-      consumes:
-      - application/json
-      description: Assigns record to account
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Proof ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Group ID
-        in: path
-        name: groupId
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Assigns record to account
-      tags:
-      - internal
-  /internal/proofs/proof/request/{id}:
-    get:
-      consumes:
-      - application/json
-      description: Retrieves a proof request by its request ID
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Proof RequestID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.VerificationEntry'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Retrieves a proof request by its request ID
-      tags:
-      - internal
-    post:
-      consumes:
-      - application/json
-      description: Completes and proof request by signing and posting it
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Proof RequestID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: Proof Model
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/model.ProofModel'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Completes and proof request by signing and posting it
-      tags:
-      - internal
-  /presentation/authorize:
-    get:
-      description: Handles the authorization request by checking the client_id and
-        request_uri parameters, and then handling the request object
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Client ID
-        in: query
-        name: client_id
-        required: true
-        type: string
-      - description: Request URI
-        in: query
-        name: request_uri
-        required: true
-        type: string
-      - description: Auth URL
-        in: query
-        name: authUrl
-        type: string
-      responses:
-        "302":
-          description: Found
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Handles the authorization request
-      tags:
-      - external
-  /presentation/proof/{id}:
-    post:
-      consumes:
-      - application/x-www-form-urlencoded
-      description: Handles the proof request by checking the content type and form
-        data, and then processing the presentations
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Proof ID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: The presentation token
-        in: formData
-        name: vp_token
-        required: true
-        type: string
-      - description: The presentation submission
-        in: formData
-        name: state
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Handles the proof request
-      tags:
-      - external
-  /presentation/proof/{id}/request-object/request.jwt:
-    get:
-      description: Responds with a request object by fetching the request object and
-        setting it as fetched
-      parameters:
-      - description: Tenant ID
-        in: path
-        name: tenantId
-        required: true
-        type: string
-      - description: Proof ID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/jwt
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Responds with a request object
-      tags:
-      - external
-  /presentation/request:
-    get:
-      description: Handles the request for presentation by creating a presentation
-        request with the provided parameters
-      parameters:
-      - description: Tenant ID
-        in: query
-        name: tenantId
-        required: true
-        type: string
-      - description: Request ID
-        in: query
-        name: requestId
-        required: true
-        type: string
-      - description: Group ID
-        in: query
-        name: groupId
-        required: true
-        type: string
-      - description: TTL
-        in: query
-        name: ttl
-        type: integer
-      - description: DCQL query base64url encoded
-        in: query
-        name: dcqlQuery
-        required: true
-        type: string
-      produces:
-      - application/jwt
-      responses:
-        "200":
-          description: OK
-          schema:
-            type: string
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/services.ServerErrorResponse'
-      summary: Handles the request for presentation
-      tags:
-      - external
-swagger: "2.0"

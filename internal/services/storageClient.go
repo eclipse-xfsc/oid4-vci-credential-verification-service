@@ -39,7 +39,11 @@ func resolveCredentials(ctx context.Context, cfg *model.Config, row *model.Verif
 		return nil, err
 	}
 
-	base := strings.TrimRight(cfg.StorageServiceURL, "/")
+	validatedBase, err := validateOutboundURL(cfg.StorageServiceURL, cfg, false)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage service URL: %w", err)
+	}
+	base := strings.TrimRight(validatedBase.String(), "/")
 	endpoint := fmt.Sprintf("%s/v1/tenants/%s/storage/%s/%s/%s/credentials",
 		base,
 		url.PathEscape(row.TenantId),
@@ -54,14 +58,17 @@ func resolveCredentials(ctx context.Context, cfg *model.Config, row *model.Verif
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := GetHttpClient().Do(req)
+	resp, err := secureHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("credential storage request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBytes+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(raw)) > maxHTTPResponseBytes {
+		return nil, errors.New("credential storage response exceeds size limit")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("credential storage returned %d: %s", resp.StatusCode, string(raw))

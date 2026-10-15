@@ -69,6 +69,8 @@ spec:
               value: {{ .Values.config.topics.authorizationReply | quote }}
             - name: CREDENTIALVERIFICATION_PROOFNOTIFY
               value: {{ .Values.config.topics.proofNotify | quote }}
+            - name: CREDENTIALVERIFICATION_STORAGE_URL
+              value: {{ .Values.config.storageServiceUrl | quote }}
             - name: CREDENTIALVERIFICATION_PRESENTATIONREQUEST
               value: {{ .Values.config.topics.presentationRequest | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED
@@ -81,17 +83,17 @@ spec:
               value: {{ .Values.config.externalPresentation.requestObjectPolicy | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTIDPOLICY
               value: {{ .Values.config.externalPresentation.clientIdPolicy | quote }}
+            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CREDENTIALSELECTIONPOLICY
+              value: {{ .Values.config.externalPresentation.credentialSelectionPolicy | quote }}
             - name: CREDENTIALVERIFICATION_LOG_LEVEL
               value: info
             - name: CREDENTIALVERIFICATION_IS_DEV
-              value: "false"
+              value: {{ .Values.config.isDev | quote }}
 
             {{- if not $injectionEnabled }}
             # Standalone deployment: resolve all dependencies from values.yaml.
             - name: CREDENTIALVERIFICATION_NATS_URL
               value: {{ .Values.config.messaging.nats.url | quote }}
-            - name: CREDENTIALVERIFICATION_STORAGE_URL
-              value: {{ .Values.config.storageServiceUrl | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_HOST
               value: {{ .Values.config.cassandra.host | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_KEYSPACE

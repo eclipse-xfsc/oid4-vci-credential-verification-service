@@ -71,7 +71,7 @@ func AddExternalRoutes(server *core.Server, authHandler *services.AuthorizationH
 // @Success 200 {string} jwt
 // @Failure 400 {object} services.ServerErrorResponse
 // @Failure 500 {object} services.ServerErrorResponse
-// @Router /presentation/request [get]
+// @Router /v1/tenants/{tenantId}/presentation/request [get]
 func HandleRequestPresentation(requestor *services.PresentationRequestor, config *model.Config) func(ctx *gin.Context) {
 	return func(ctx *gin.Context) {
 		queryParams := ctx.Request.URL.Query()
@@ -122,7 +122,7 @@ func HandleRequestPresentation(requestor *services.PresentationRequestor, config
 // @Success 200 {string} jwt
 // @Failure 400 {object} services.ServerErrorResponse
 // @Failure 500 {object} services.ServerErrorResponse
-// @Router /presentation/proof/{id}/request-object/request.jwt [get]
+// @Router /v1/tenants/{tenantId}/presentation/proof/{id}/request-object/request.jwt [get]
 func ResponseRequestObject(c *gin.Context, requestor *services.PresentationRequestor, config *model.Config) {
 
 	id, b := c.Params.Get("id")

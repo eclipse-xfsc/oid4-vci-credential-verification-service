@@ -1,3 +1,4 @@
+isDev: true
 servingPort: 8070
 cassandraHosts: 127.0.0.1:9042
 cassandraUser: cassandra
@@ -9,6 +10,7 @@ externalPresentation:
   enabled: true
   authorizeEndpoint: http://localhost:8080
   requestObjectPolicy: 
+  credentialSelectionPolicy: ""
   clientIdPolicy:
 signerService:
   presentationVerifyUrl: http://localhost:9000/v1/presentation/verify

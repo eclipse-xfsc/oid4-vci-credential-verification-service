@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	config.BaseConfig `mapstructure:",squash"`
+	IsDev             bool   `mapstructure:"isDev" envconfig:"IS_DEV" default:"false"`
 	ServingPort       string `mapstructure:"servingPort" envconfig:"SERVINGPORT" default:"8080"`
 	PublicBasePath    string `mapstructure:"publicBasePath" envconfig:"PUBLICBASEPATH" default:"/api/presentation/proof"`
 	Cassandra         struct {
@@ -27,11 +28,12 @@ type Config struct {
 	} `mapstructure:"migrations" envconfig:"MIGRATIONS"`
 	StateSigningKey      string `mapstructure:"stateSigningKey" envconfig:"STATESIGNINGKEY" json:"-"`
 	ExternalPresentation struct {
-		Enabled             bool   `mapstructure:"enabled" envconfig:"ENABLED"`
-		AuthorizeEndpoint   string `mapstructure:"authorizeEndpoint" envconfig:"AUTHORIZEENDPOINT"`
-		RequestObjectPolicy string `mapstructure:"requestObjectPolicy" envconfig:"REQUESTOBJECTPOLICY"`
-		ClientIdPolicy      string `mapstructure:"clientIdPolicy"  envconfig:"CLIENTIDPOLICY"`
-		ClientUrlSchema     string `mapstructure:"clientUrlSchema" envconfig:"CLIENTURLSCHEMA" default:"https"`
+		Enabled                   bool   `mapstructure:"enabled" envconfig:"ENABLED"`
+		AuthorizeEndpoint         string `mapstructure:"authorizeEndpoint" envconfig:"AUTHORIZEENDPOINT"`
+		RequestObjectPolicy       string `mapstructure:"requestObjectPolicy" envconfig:"REQUESTOBJECTPOLICY"`
+		ClientIdPolicy            string `mapstructure:"clientIdPolicy"  envconfig:"CLIENTIDPOLICY"`
+		ClientUrlSchema           string `mapstructure:"clientUrlSchema" envconfig:"CLIENTURLSCHEMA" default:"https"`
+		CredentialSelectionPolicy string `mapstructure:"credentialSelectionPolicy" envconfig:"CREDENTIALSELECTIONPOLICY"`
 	} `mapstructure:"externalpresentation"`
 	SignerService struct {
 		PresentationVerifyUrl string `mapstructure:"presentationVerifyUrl" envconfig:"PRESENTATIONVERIFYURL"`

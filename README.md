@@ -1,5 +1,151 @@
 # OID4VC Credential Verification Service
 
+## Security hardening and production configuration (October 2026)
+
+**External Request Objects are authenticated before any request claims are used.** The
+External DID-based Request Objects are verified using the `ssi-jwt/v2` DID key resolver. The outer `client_id` must match the signed claim, and `kid` must identify a key of that DID. Non-DID client identifier methods fail closed until supported.
+
+The uploaded Crypto Provider currently offers `/v1/sign`,
+`/v1/credential/verify`, `/v1/presentation/verify`, and
+`/v1/presentation/proof`; it does **not** expose a general JWS Request Object
+verification endpoint. We therefore verify external Request Objects against a
+DID-bound SSI-JWT verification instead of incorrectly treating credential verification
+as JWT signature verification. If the Signer gains a generic JWS verification
+API, this trust adapter can be replaced without changing the flow.
+
+**Network controls:** External `request_uri` and `response_uri` must use HTTPS
+outside development. `isDev: true` permits HTTP for local testing. External
+URLs cannot point to loopback/private/link-local IP addresses in production,
+including after DNS resolution. HTTP 3xx responses are rejected and **never
+followed**, including on `direct_post`. All outbound HTTP clients have
+10-second timeouts and bounded responses. Internal Storage/Signer/Policy
+service URLs may use Kubernetes-internal HTTP, but also reject redirects.
+
+**Do not forward bearer tokens or cookies** from the inbound authorization
+request when dereferencing an external `request_uri`.
+
+### Holder fulfillment with consent/selection policy
+
+`externalPresentation.credentialSelectionPolicy` is optional for trusted
+headless use. When configured, `/fulfill` sends this JSON request to the
+existing Policy Service over HTTP:
+
+```json
+{
+  "tenantId": "tenant-a",
+  "groupId": "account-a",
+  "clientId": "decentralized_identifier:did:web:verifier.example",
+  "dcqlQuery": {"credentials": [{"id": "identity", "format": "dc+sd-jwt", "meta": {"vct_values": ["urn:example:identity"]}}]},
+  "candidates": [{"description": {"id": "identity"}, "credentials": {"credential-key-1": "<credential>"}}]
+}
+```
+
+Policy Service response:
+
+```json
+{
+  "allow": true,
+  "selection": {
+    "identity": ["credential-key-1"]
+  }
+}
+```
+
+`allow: false` denies disclosure. If `allow: true` and `selection` is absent
+or empty, all matched candidates are used. If `selection` is provided, only
+those query IDs and credential keys are retained; unknown credential keys or
+empty selections fail closed. Consent and user interaction happen **before**
+`/fulfill`; the service never infers user consent from DCQL matching.
+
+```mermaid
+sequenceDiagram
+    participant App as Authorized Application / Consent UI
+    participant CVS as Verification Service (Holder role)
+    participant DB as Cassandra
+    participant Storage as Credential Storage
+    participant Policy as Policy Service
+    participant Signer as Crypto Provider / Signer
+    participant V as External Verifier
+    App->>CVS: POST /internal/proofs/proof/{state}/fulfill (signing identity)
+    CVS->>DB: Load stored external Request Object / DCQL
+    CVS->>DB: CAS requested -> fulfilling
+    CVS->>Storage: POST DCQL /v1/tenants/{tenant}/storage/{region}/{country}/{account}/credentials
+    Storage-->>CVS: FilterResult groups
+    CVS->>Policy: tenant, clientId, DCQL, candidates
+    Policy-->>CVS: allow + selection per query ID / credential key
+    alt denied or no matches
+        CVS-->>App: error, no presentation sent
+    else allowed
+        loop each selected DCQL query
+            CVS->>Signer: POST /v1/presentation/proof (format, aud, nonce, credential)
+            Signer-->>CVS: signed ldp_vc VP or dc+sd-jwt presentation
+        end
+        CVS->>CVS: VPToken.ValidateAgainst(persisted DCQL)
+        CVS->>V: POST response_uri (vp_token, original external state)
+        Note over CVS,V: Redirects forbidden; HTTPS outside dev
+        V-->>CVS: HTTP 2xx
+        CVS->>DB: status = presentation-transmitted
+        CVS-->>App: success
+    end
+```
+
+### Transaction state and external OID4VP state
+
+`VerificationEntry.State` remains the internal database **status**. The
+external verifier's optional OID4VP `state` is stored separately in
+`VerificationEntry.AuthorizationState` (Cassandra migration
+`V003__add_authorization_state.cql`) and is returned **unchanged** in the
+`direct_post` response. An absent external state is not fabricated. The
+fulfillment path acquires a Cassandra conditional update
+`presentation-requested -> presentation-fulfilling` to reject concurrent
+submissions. On failure before transmission it releases the claim; after a
+successful network submission it never automatically retries, to avoid
+releasing the same credentials twice. A durable outbox would be required for
+exactly-once recovery across process crashes.
+
+### Format-specific signing
+
+The Crypto Provider's `/v1/presentation/proof` endpoint is used for both
+`ldp_vc` and `dc+sd-jwt`. For SD-JWT the service passes the original compact
+SD-JWT, `format: dc+sd-jwt`, stored `nonce`, `aud: clientId`, and holder signing
+identity; the Signer creates the key-bound SD-JWT presentation. For LDP VC,
+the service constructs a JSON-LD VP and asks the Signer for its proof.
+Unsupported formats fail closed. Manual legacy proof submission cannot create
+SD-JWT presentations without the persisted transaction audience/nonce.
+
+### Configuration and later Tenant Service
+
+```yaml
+isDev: false
+country: DE
+region: EU
+externalPresentation:
+  clientIdPolicy: http://policy-service:8080/policy/client
+  credentialSelectionPolicy: http://policy-service:8080/policy/credential-selection
+```
+
+`country` and `region` deliberately remain **static service settings**. The
+Storage adapter consumes these fields when constructing the retrieval path.
+A future Tenant Service should resolve them from `tenantId` there; it must not
+change DCQL, signer or external Request Object semantics.
+
+### Swagger, Insomnia, Playground
+
+- `docs/swagger.json`, `docs/swagger.yaml`, `docs/docs.go` describe the
+  tenant-scoped routes and `/fulfill`.
+- `docs/Insomnia_OID4VP_2026.json` replaces the legacy Presentation Exchange
+  collection; it includes direct-post, Request Object, authorization, internal
+  proof and fulfillment routes.
+- Docker playground includes Holder Fulfillment and tenant-qualified URLs;
+  its HTTP client does not follow redirects.
+
+**Deployment caution:** A complete Go 1.25 build, signer integration tests,
+Cassandra migration test, and an end-to-end test with a trusted external
+verifier are still required before production rollout. The existing manual
+proof route is retained for compatibility and should be restricted to
+privileged internal callers.
+
+
 The Credential Verification Service implements the verifier-facing and holder-facing OID4VP flows used by the XFSC OCM stack. It supports OID4VP 1.0/DCQL through `oid4-vci-vp-library v1.9.2` and integrates with Credential Storage, Crypto Provider/Signer, Cassandra and NATS.
 
 > **Terminology:** this service uses **DCQL**. `presentation_definition` / Presentation Exchange is legacy terminology and is not part of the current OID4VP flow described here.
@@ -357,3 +503,29 @@ go vet ./...
 ```
 
 For an end-to-end holder test, run Credential Storage in **DIRECT** mode, seed credentials for the same tenant/region/country/account (`groupId`), submit an external Authorization Request containing DCQL, authorize it locally, then invoke `/fulfill` and verify that the external verifier receives `vp_token` via `direct_post`.
+
+**Known limitation:** Only DID-based external verifier identities are supported. Other OID4VP client identifier methods require their own resolvers. HTTP `authUrl` overrides are permitted only in dev mode.
+
+
+## External Request Object verification (DID profile)
+
+The holder resolves `request_uri` without redirects and passes the **outer** `client_id` into the verifier. The compact JWS header and payload are decoded as **untrusted** input only to select a DID verification method. The `kid` must refer to that same DID, and embedded/remote attacker-selected key sources (`jwk`, `jku`, `x5u`) are rejected. `ssi-jwt/v2.Parse` resolves the DID key and verifies the signature. The verified `client_id` must equal the outer `client_id`; `iss`, when present, must also match. Only after verification does OID4VP request validation and the policy/consent path run.
+
+**Scope:** This implementation supports DID-based verifier identities only. X.509, verifier attestation and other client identifier methods require separate resolvers and currently fail closed. A DID signature proves key control, not that a verifier is authorized to receive credentials; policy must still decide. DID resolution must be restricted to trusted resolver methods and egress rules in production.
+
+## `direct_post` and `direct_post.jwt`
+
+The Holder flow treats presentation format and Authorization Response mode as independent protocol dimensions.
+
+| DCQL credential format | `direct_post` | `direct_post.jwt` |
+| --- | --- | --- |
+| `dc+sd-jwt` | supported | supported |
+| `ldp_vc` | supported | supported |
+
+For `direct_post`, the service posts `vp_token` and the external `state` as `application/x-www-form-urlencoded` fields.
+
+For `direct_post.jwt`, the service builds the same OID4VP `AuthorizationResponse`, encrypts it as a compact JWE, and posts it in the single `response` form field. The current response encryptor supports Verifier metadata containing an `ECDH-ES` / `P-256` encryption JWK and selects `A128GCM` (preferred/default) or `A256GCM` from `encrypted_response_enc_values_supported`. The authenticated Request Object's `client_metadata` is persisted with the presentation transaction so the encryption key remains available after consent and credential selection.
+
+The Request Object signature key and the Authorization Response encryption key have different purposes. A DID verification method (`kid` in the Request Object JWS) authenticates the Request Object. `client_metadata.jwks` supplies the Verifier's response-encryption key and is never used as a replacement for Request Object signature verification.
+
+A request using an unsupported response mode, encryption key type, key agreement algorithm, or content-encryption algorithm fails closed. Credential format selection remains in the presentation builder and is not inferred from `response_mode`.

@@ -6,7 +6,7 @@ import json
 import os
 import uuid
 from urllib.parse import urlencode, urlsplit, parse_qs
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 from urllib.error import HTTPError
 
 import nats
@@ -58,9 +58,10 @@ def page(message='', status=200):
 <section><h2>2 · Authorization-Link per NATS</h2><form method="post" action="/authorization-nats">
 <label>client_id</label><input name="client_id" value="redirect_uri:http://localhost:8090/callback"><label>request_uri</label><input name="request_uri" placeholder="http://.../request.jwt"><label>Tenant / Group / Request</label><input name="tenant" value="demo"><input name="group" value="demo"><input name="request_id" value="demo-request"><button>NATS-Event senden</button></form><small>Publiziert den Typ verifier.presentation.authorization.remote auf dem Authorization-Subject; die Antwort ist asynchron auf dem Authorization-Reply-Subject.</small></section>
 <section><h2>3 · Presentation-URI über NATS erzeugen</h2><form method="post" action="/presentation-nats">
-<label>client_id</label><input name="client_id" value="redirect_uri:http://localhost:8090/callback"><label>tenant_uri (Host)</label><input name="tenant_uri" value="localhost:8086"><label>target_uri (Host)</label><input name="target_uri" value="localhost:8086/presentation"><label>requestobject_uri (Host)</label><input name="requestobject_uri" value="localhost:8086/presentation/proof"><label>Tenant / Group / Request</label><input name="tenant" value="demo"><input name="group" value="demo"><input name="request_id" value="demo-request"><label>DCQL Query</label><textarea name="dcql">{html.escape(DEFAULT_DCQL)}</textarea><button>NATS Request/Reply senden</button></form><small>Eventtyp verifier.presentation.authorization, Subject request. Die URI wird aus der Antwort angezeigt.</small></section>
-<section><h2>4 · Presentation-URI / Request-Object im Browser abfragen</h2><form method="get" action="/inspect"><label>Presentation-URI oder HTTP Request-Object URL</label><textarea name="uri" placeholder="http://localhost:8086/presentation/proof/.../request-object/request.jwt"></textarea><label>Tenant / Group</label><input name="tenant" value="demo"><input name="group" value="demo"><button>Abfragen</button></form><small>Request-Object Abruf sendet die benötigten Tenant/Group-Header; bei Authorization-Links wird request_uri aufgelöst.</small></section>
-<section><h2>5 · DCQL per HTTP erzeugen</h2><form method="post" action="/presentation-http"><label>client_id</label><input name="client_id" value="redirect_uri:http://localhost:8090/callback"><label>Tenant / Group / Request</label><input name="tenant" value="demo"><input name="group" value="demo"><input name="request_id" value="demo-request"><label>DCQL Query</label><textarea name="dcql">{html.escape(DEFAULT_DCQL)}</textarea><button>GET /presentation/request aufrufen</button></form></section></html>'''
+<label>client_id</label><input name="client_id" value="redirect_uri:http://localhost:8090/callback"><label>tenant_uri (Host)</label><input name="tenant_uri" value="localhost:8086"><label>target_uri (Host)</label><input name="target_uri" value="localhost:8086/presentation"><label>requestobject_uri (Host)</label><input name="requestobject_uri" value="localhost:8086"><label>Tenant / Group / Request</label><input name="tenant" value="demo"><input name="group" value="demo"><input name="request_id" value="demo-request"><label>DCQL Query</label><textarea name="dcql">{html.escape(DEFAULT_DCQL)}</textarea><button>NATS Request/Reply senden</button></form><small>Eventtyp verifier.presentation.authorization, Subject request. Die URI wird aus der Antwort angezeigt.</small></section>
+<section><h2>4 · Presentation-URI / Request-Object im Browser abfragen</h2><form method="get" action="/inspect"><label>Presentation-URI oder HTTP Request-Object URL</label><textarea name="uri" placeholder="http://localhost:8086/presentation/proof/.../request-object/request.jwt"></textarea><label>Tenant / Group</label><input name="tenant" value="demo"><input name="group" value="demo"><button>Abfragen</button></form><small>Request-Object-Abruf folgt keinen Redirects; Tenant steht im Pfad. Bei Authorization-Links wird request_uri aufgelöst.</small></section>
+<section><h2>5 · Holder-Fulfillment (nach Consent/Policy)</h2><form method="post" action="/fulfill"><label>Tenant</label><input name="tenant" value="demo"><label>Interner Presentation-State</label><input name="state" placeholder="signed state"><label>Holder DID</label><input name="holderDid" value="did:web:holder.example"><label>Signer Namespace / Group / Key</label><input name="signNamespace" value="demo"><input name="signGroup" value="demo"><input name="signKey" value="presentation-key"><button>Fulfill ausführen</button></form><small>Credentials werden vom Verification Service anhand der gespeicherten DCQL aus Storage geladen; Policy entscheidet über Consent/Selection.</small></section>
+<section><h2>6 · DCQL per HTTP erzeugen</h2><form method="post" action="/presentation-http"><label>client_id</label><input name="client_id" value="redirect_uri:http://localhost:8090/callback"><label>Tenant / Group / Request</label><input name="tenant" value="demo"><input name="group" value="demo"><input name="request_id" value="demo-request"><label>DCQL Query</label><textarea name="dcql">{html.escape(DEFAULT_DCQL)}</textarea><button>GET /presentation/request aufrufen</button></form></section></html>'''
     return web.Response(text=body,content_type='text/html',status=status)
 
 def fields(request): return request.post()
@@ -76,8 +77,12 @@ def fetch(url, hs):
         raise ValueError('Only localhost/verification URLs can be fetched from playground')
     local=VERIFIER + parsed.path + ('?'+parsed.query if parsed.query else '')
     req=Request(local, headers=hs)
+    class NoRedirect(HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    opener=build_opener(NoRedirect)
     try:
-        with urlopen(req, timeout=12) as r: return r.status, r.read().decode(errors='replace')
+        with opener.open(req, timeout=12) as r: return r.status, r.read(2*1024*1024).decode(errors='replace')
     except HTTPError as e: return e.code, e.read().decode(errors='replace')
 
 async def index(request): return page()
@@ -88,7 +93,7 @@ async def auth_redirect(request):
     parsed=urlsplit(uri)
     qs=parse_qs(parsed.query)
     if not qs.get('client_id') or not qs.get('request_uri'): return page('client_id und request_uri fehlen',400)
-    dest=PUBLIC+'/presentation/authorize?'+urlencode({'client_id':qs['client_id'][0], 'request_uri':qs['request_uri'][0]})
+    dest=PUBLIC+'/v1/tenants/'+f.get('tenant','demo')+'/presentation/authorize?'+urlencode({'client_id':qs['client_id'][0], 'request_uri':qs['request_uri'][0]})
     # Browser navigation cannot attach custom tenant headers; route through our HTTP forwarder.
     dest='/authorize-forward?'+urlencode({'uri':dest,'tenant':f.get('tenant','demo'),'group':f.get('group','demo'),'request_id':f.get('request_id','demo-request')})
     raise web.HTTPFound(dest)
@@ -126,7 +131,7 @@ async def inspect(request):
     qs=parse_qs(parsed.query)
     target=qs.get('request_uri',[uri])[0]
     try:
-        status,body=await asyncio.to_thread(fetch,target,headers(f))
+        status,body=await asyncio.to_thread(fetch,target,{})
         return page(f'HTTP {status}\n{body}')
     except Exception as e: return page(str(e),502)
 
@@ -134,9 +139,25 @@ async def pres_http(request):
     f=await fields(request)
     try:
         query=base64.urlsafe_b64encode(json.dumps(json.loads(f.get('dcql','{}'))).encode()).rstrip(b'=').decode()
-        url=PUBLIC+'/presentation/request?'+urlencode({'requestId':f.get('request_id','demo-request'),'dcqlQuery':query})
+        url=PUBLIC+'/v1/tenants/'+f.get('tenant','demo')+'/presentation/request?'+urlencode({'requestId':f.get('request_id','demo-request'),'dcqlQuery':query})
         status,body=await asyncio.to_thread(fetch,url,headers(f))
         return page(f'HTTP {status}\n{body}')
+    except Exception as e: return page(str(e),502)
+
+async def fulfill(request):
+    f=await fields(request)
+    tenant=f.get('tenant','demo'); state=f.get('state','').strip()
+    if not state: return page('State fehlt',400)
+    path=f'/v1/tenants/{tenant}/internal/proofs/proof/{state}/fulfill'
+    payload={key:f.get(key,'') for key in ('holderDid','signNamespace','signGroup','signKey')}
+    req=Request(VERIFIER+path, data=json.dumps(payload).encode(), headers={'Content-Type':'application/json'}, method='POST')
+    try:
+        class NoRedirect(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl): return None
+        with build_opener(NoRedirect).open(req,timeout=20) as r:
+            return page(f'HTTP {r.status}\n'+r.read(2*1024*1024).decode(errors='replace'))
+    except HTTPError as e:
+        return page(f'HTTP {e.code}\n'+e.read(4096).decode(errors='replace'), e.code)
     except Exception as e: return page(str(e),502)
 
 async def callback(request):
@@ -150,5 +171,6 @@ app.router.add_post('/authorization-nats',auth_nats)
 app.router.add_post('/presentation-nats',pres_nats)
 app.router.add_get('/inspect',inspect)
 app.router.add_post('/presentation-http',pres_http)
+app.router.add_post('/fulfill',fulfill)
 app.router.add_get('/callback',callback)
 web.run_app(app,host='0.0.0.0',port=8090)

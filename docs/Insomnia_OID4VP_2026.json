@@ -1,0 +1,124 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_date": "2024-04-10T22:03:52.117Z",
+  "__export_source": "insomnia.desktop.app:v8.6.1",
+  "resources": [
+    {
+      "_id": "wrk_oid4vp_2026",
+      "_type": "workspace",
+      "name": "XFSC OID4VP 1.0 Verification",
+      "description": "Current tenant-scoped routes; DCQL, no Presentation Definition."
+    },
+    {
+      "_id": "env_oid4vp_2026",
+      "_type": "environment",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Local development",
+      "data": {
+        "base_url": "http://localhost:8080",
+        "tenantId": "demo",
+        "state": "REPLACE_SIGNED_INTERNAL_STATE",
+        "groupId": "demo"
+      }
+    },
+    {
+      "_id": "req_oid4vp_00",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Get request object",
+      "method": "GET",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/presentation/proof/{{ _.state }}/request-object/request.jwt",
+      "headers": [],
+      "parameters": []
+    },
+    {
+      "_id": "req_oid4vp_01",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Direct POST",
+      "method": "POST",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/presentation/proof/{{ _.state }}",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/x-www-form-urlencoded"
+        }
+      ],
+      "parameters": [],
+      "body": {
+        "mimeType": "application/x-www-form-urlencoded",
+        "text": "vp_token=REPLACE&state=REPLACE"
+      }
+    },
+    {
+      "_id": "req_oid4vp_02",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "External authorization",
+      "method": "GET",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/presentation/authorize?client_id=REPLACE&request_uri=REPLACE",
+      "headers": [],
+      "parameters": []
+    },
+    {
+      "_id": "req_oid4vp_03",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Create presentation request (dev)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/presentation/request?requestId=demo&dcqlQuery=REPLACE",
+      "headers": [],
+      "parameters": []
+    },
+    {
+      "_id": "req_oid4vp_04",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Get internal proof",
+      "method": "GET",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/internal/proofs/proof/{{ _.state }}",
+      "headers": [],
+      "parameters": []
+    },
+    {
+      "_id": "req_oid4vp_05",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Fulfill external authorization",
+      "method": "POST",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/internal/proofs/proof/{{ _.state }}/fulfill",
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "parameters": [],
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\"holderDid\": \"did:web:holder.example\", \"signNamespace\": \"demo\", \"signGroup\": \"demo\", \"signKey\": \"presentation-key\"}"
+      }
+    },
+    {
+      "_id": "req_oid4vp_06",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "List proofs",
+      "method": "GET",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/internal/list/proofs/{{ _.groupId }}",
+      "headers": [],
+      "parameters": []
+    },
+    {
+      "_id": "req_oid4vp_07",
+      "_type": "request",
+      "parentId": "wrk_oid4vp_2026",
+      "name": "Assign group (legacy)",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/v1/tenants/{{ _.tenantId }}/internal/proofs/proof/{{ _.state }}/assign/{{ _.groupId }}",
+      "headers": [],
+      "parameters": []
+    }
+  ]
+}

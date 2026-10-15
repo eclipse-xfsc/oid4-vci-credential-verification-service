@@ -19,7 +19,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/internal/list/proofs/{groupId}": {
+        "/v1/tenants/{tenantId}/internal/list/proofs/{groupId}": {
             "get": {
                 "description": "Lists proofs for a group",
                 "consumes": [
@@ -73,7 +73,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/internal/proofs/proof/request/{id}": {
+        "/v1/tenants/{tenantId}/internal/proofs/proof/request/{id}": {
             "get": {
                 "description": "Retrieves a proof request by its request ID",
                 "consumes": [
@@ -179,7 +179,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/internal/proofs/proof/{id}": {
+        "/v1/tenants/{tenantId}/internal/proofs/proof/{id}": {
             "get": {
                 "description": "Retrieves a proof request by its ID",
                 "consumes": [
@@ -285,7 +285,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/internal/proofs/proof/{id}/assign/{groupId}": {
+        "/v1/tenants/{tenantId}/internal/proofs/proof/{id}/assign/{groupId}": {
             "put": {
                 "description": "Assigns record to account",
                 "consumes": [
@@ -340,7 +340,58 @@ const docTemplate = `{
                 }
             }
         },
-        "/presentation/authorize": {
+        "/v1/tenants/{tenantId}/internal/proofs/proof/{id}/fulfill": {
+            "post": {
+                "tags": [
+                    "internal"
+                ],
+                "summary": "Fulfill external OID4VP request from Credential Storage",
+                "description": "Authorized Holder fulfillment. Resolves persisted DCQL via Storage, applies selection policy, signs presentations and direct_posts to external verifier.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "parameters": [
+                    {
+                        "name": "tenantId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "type": "string"
+                    },
+                    {
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/model.FulfillPresentationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Presentation transmitted"
+                    },
+                    "400": {
+                        "description": "Invalid request"
+                    },
+                    "409": {
+                        "description": "Already processing/completed"
+                    },
+                    "500": {
+                        "description": "Failure"
+                    }
+                }
+            }
+        },
+        "/v1/tenants/{tenantId}/presentation/authorize": {
             "get": {
                 "description": "Handles the authorization request by checking the client_id and request_uri parameters, and then handling the request object",
                 "tags": [
@@ -395,7 +446,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/presentation/proof/{id}": {
+        "/v1/tenants/{tenantId}/presentation/proof/{id}": {
             "post": {
                 "description": "Handles the proof request by checking the content type and form data, and then processing the presentations",
                 "consumes": [
@@ -457,7 +508,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/presentation/proof/{id}/request-object/request.jwt": {
+        "/v1/tenants/{tenantId}/presentation/proof/{id}/request-object/request.jwt": {
             "get": {
                 "description": "Responds with a request object by fetching the request object and setting it as fetched",
                 "produces": [
@@ -505,7 +556,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/presentation/request": {
+        "/v1/tenants/{tenantId}/presentation/request": {
             "get": {
                 "description": "Handles the request for presentation by creating a presentation request with the provided parameters",
                 "produces": [
@@ -516,6 +567,13 @@ const docTemplate = `{
                 ],
                 "summary": "Handles the request for presentation",
                 "parameters": [
+                    {
+                        "name": "tenantId",
+                        "in": "path",
+                        "required": true,
+                        "type": "string",
+                        "description": "Tenant ID"
+                    },
                     {
                         "type": "string",
                         "description": "Tenant ID",
@@ -646,6 +704,10 @@ const docTemplate = `{
                 },
                 "state": {
                     "type": "string"
+                },
+                "authorizationState": {
+                    "type": "string",
+                    "description": "Original state supplied by external verifier (distinct from internal status)"
                 }
             }
         },
@@ -910,6 +972,27 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.FulfillPresentationRequest": {
+            "type": "object",
+            "required": [
+                "holderDid",
+                "signKey"
+            ],
+            "properties": {
+                "holderDid": {
+                    "type": "string"
+                },
+                "signNamespace": {
+                    "type": "string"
+                },
+                "signGroup": {
+                    "type": "string"
+                },
+                "signKey": {
                     "type": "string"
                 }
             }

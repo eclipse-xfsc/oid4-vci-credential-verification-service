@@ -42,14 +42,12 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 			return "", err
 		}
 
-		val, exist := res["allow"]
-
-		if !exist || val != "true" {
+		if !policyAllows(res) {
 			return "", errors.New("policy forbids the processing")
 		}
 	}
 
-	object, err := getRequestObject(request_uri, ctx)
+	object, err := getRequestObject(request_uri, clientId, ctx)
 
 	if err != nil {
 		return "", err
@@ -61,8 +59,8 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 		return "", errors.New("client_id does not match request object")
 	}
 
-	if object.ResponseMode != string(types.DirectPost) {
-		return "", errors.ErrUnsupported
+	if object.ResponseMode != string(types.DirectPost) && object.ResponseMode != string(types.DirectPostJwt) {
+		return "", fmt.Errorf("unsupported response_mode %q", object.ResponseMode)
 	}
 
 	if config.ExternalPresentation.RequestObjectPolicy != "" {
@@ -73,9 +71,7 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 			return "", err
 		}
 
-		val, exist := res["allow"]
-
-		if !exist || val != "true" {
+		if !policyAllows(res) {
 			return "", errors.New("policy forbidds the processing")
 		}
 	}
@@ -117,7 +113,7 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 // @Success 302
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /presentation/authorize [get]
+// @Router /v1/tenants/{tenantId}/presentation/authorize [get]
 func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, config *model.Config) {
 	client_id, a := c.GetQuery("client_id")
 	request_uri, b := c.GetQuery("request_uri")
@@ -157,7 +153,7 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 func ResolveAuthUrl(c *gin.Context, config *model.Config) (*url.URL, error) {
 	var authUrl *url.URL
 	var err error
-	if c != nil {
+	if c != nil && config.IsDev {
 		if authUrlParam, ok := c.GetQuery("authUrl"); ok {
 			authUrl, err = parsePercentEncodedUrl(authUrlParam, false)
 			if err == nil {
@@ -165,7 +161,7 @@ func ResolveAuthUrl(c *gin.Context, config *model.Config) (*url.URL, error) {
 			}
 		}
 	}
-	authUrl, err = url.Parse(config.ExternalPresentation.AuthorizeEndpoint)
+	authUrl, err = validateOutboundURL(config.ExternalPresentation.AuthorizeEndpoint, config, true)
 	if err != nil {
 		return nil, ErrorResponse(c, "AuthorizeEndpoint is not parsable", err)
 	}

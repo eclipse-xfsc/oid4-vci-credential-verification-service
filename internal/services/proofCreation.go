@@ -2,12 +2,14 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/types"
 	"github.com/gin-gonic/gin"
 )
 
@@ -40,7 +43,7 @@ const (
 // @Success 200
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /internal/proofs/proof/{id} [post]
+// @Router /v1/tenants/{tenantId}/internal/proofs/proof/{id} [post]
 func HandleCreateProofById(ctx *gin.Context, config *model.Config) {
 	handleCreateProof(ctx, config, false)
 }
@@ -57,7 +60,7 @@ func HandleCreateProofById(ctx *gin.Context, config *model.Config) {
 // @Success 200
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /internal/proofs/proof/request/{id} [post]
+// @Router /v1/tenants/{tenantId}/internal/proofs/proof/request/{id} [post]
 func HandleCreateProofByRequestId(ctx *gin.Context, config *model.Config) {
 	handleCreateProof(ctx, config, true)
 }
@@ -86,13 +89,6 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 		return
 	}
 
-	res, err := signerServiceSignLdpJson(body, logger, config)
-
-	if err != nil {
-		ErrorResponse(ctx, SignError, err)
-		return
-	}
-
 	var row *model.VerificationEntry
 	if byRequestId {
 		row, err = common.GetEntryFromDbByRequestId(context, tenantId, id)
@@ -100,15 +96,40 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 		row, err = common.GetEntryFromDb(context, tenantId, id)
 	}
 	if err != nil {
-		_ = ErrorResponse(ctx, RecordNotFoundError, err)
+		ErrorResponse(ctx, RecordNotFoundError, err)
 		return
 	}
-	err = postResponse(res, row, logger)
+	acquired, err := common.TryBeginFulfillment(context, row)
+	if err != nil {
+		ErrorResponse(ctx, "Cannot lock fulfillment", err)
+		return
+	}
+	if !acquired {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "presentation already fulfilling or completed"})
+		return
+	}
+	transmitted := false
+	defer func() {
+		if !transmitted {
+			_ = common.ReleaseFulfillment(context, row)
+		}
+	}()
+	res, err := signerServiceSignPresentations(body, row, logger, config)
+	if err != nil {
+		ErrorResponse(ctx, SignError, err)
+		return
+	}
+	if err := res.ValidateAgainst(&row.DCQLQuery); err != nil {
+		ErrorResponse(ctx, "DCQL validation failed", err)
+		return
+	}
+	err = postResponse(context, res, row, logger)
 	if err != nil {
 		_ = ErrorResponse(ctx, PostResponseError, err)
 		return
 	}
 
+	transmitted = true
 	err = common.UpdateDbStatus(context, tenantId, string(model.PresentationTransmitted), id)
 
 	if err != nil {
@@ -151,9 +172,30 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 		request.SignGroup = row.GroupId
 	}
 
+	acquired, err := common.TryBeginFulfillment(ctx.Request.Context(), row)
+	if err != nil {
+		ErrorResponse(ctx, "Cannot lock fulfillment", err)
+		return
+	}
+	if !acquired {
+		ctx.JSON(http.StatusConflict, gin.H{"error": "presentation already fulfilling or completed"})
+		return
+	}
+	transmitted := false
+	defer func() {
+		if !transmitted {
+			_ = common.ReleaseFulfillment(ctx.Request.Context(), row)
+		}
+	}()
+
 	groups, err := resolveCredentials(ctx.Request.Context(), config, row)
 	if err != nil {
 		ErrorResponse(ctx, "Credential selection failed", err)
+		return
+	}
+	groups, err = applyCredentialSelectionPolicy(row.TenantId, row.GroupId, row.ClientId, row.DCQLQuery, groups, config.ExternalPresentation.CredentialSelectionPolicy)
+	if err != nil {
+		ErrorResponse(ctx, "Credential disclosure denied", err)
 		return
 	}
 
@@ -164,7 +206,7 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 		SignGroup:     request.SignGroup,
 		HolderDid:     request.HolderDid,
 	}
-	vpToken, err := signerServiceSignLdpJson(proof, logger, config)
+	vpToken, err := signerServiceSignPresentations(proof, row, logger, config)
 	if err != nil {
 		ErrorResponse(ctx, SignError, err)
 		return
@@ -173,10 +215,11 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 		ErrorResponse(ctx, "DCQL validation failed", err)
 		return
 	}
-	if err := postResponse(vpToken, row, logger); err != nil {
+	if err := postResponse(ctx.Request.Context(), vpToken, row, logger); err != nil {
 		ErrorResponse(ctx, PostResponseError, err)
 		return
 	}
+	transmitted = true // Never retry after a successful network submission.
 	if err := common.UpdateDbStatus(ctx.Request.Context(), tenantID, string(model.PresentationTransmitted), id); err != nil {
 		ErrorResponse(ctx, TransmitError, err)
 		return
@@ -195,7 +238,7 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 // @Success 200 {object} model.VerificationEntry
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /internal/proofs/proof/{id} [get]
+// @Router /v1/tenants/{tenantId}/internal/proofs/proof/{id} [get]
 func HandleGetProofRequestById(ctx *gin.Context, config *model.Config) {
 	handleGetProofRequest(ctx, config, false)
 }
@@ -211,7 +254,7 @@ func HandleGetProofRequestById(ctx *gin.Context, config *model.Config) {
 // @Success 200 {object} model.VerificationEntry
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /internal/proofs/proof/request/{id} [get]
+// @Router /v1/tenants/{tenantId}/internal/proofs/proof/request/{id} [get]
 func HandleGetProofRequestByRequestId(ctx *gin.Context, config *model.Config) {
 	handleGetProofRequest(ctx, config, true)
 }
@@ -246,7 +289,7 @@ func handleGetProofRequest(ctx *gin.Context, config *model.Config, byRequestId b
 // @Success 200
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /internal/proofs/proof/{id}/assign/{groupId} [put]
+// @Router /v1/tenants/{tenantId}/internal/proofs/proof/{id}/assign/{groupId} [put]
 func HandleAssignProof(ctx *gin.Context, config *model.Config) {
 	id := ctx.Param("id")
 	tenantId := ctx.Param("tenantId")
@@ -272,7 +315,7 @@ func HandleAssignProof(ctx *gin.Context, config *model.Config) {
 // @Success 200 {array} model.VerificationEntry
 // @Failure 400 {object} ServerErrorResponse
 // @Failure 500 {object} ServerErrorResponse
-// @Router /internal/list/proofs/{groupId} [get]
+// @Router /v1/tenants/{tenantId}/internal/list/proofs/{groupId} [get]
 func HandleListProof(ctx *gin.Context, config *model.Config) {
 	groupId := ctx.Param("groupId")
 	tenantId := ctx.Param("tenantId")
@@ -287,12 +330,43 @@ func HandleListProof(ctx *gin.Context, config *model.Config) {
 	}
 }
 
-func postResponse(vpToken presentation.VPToken, row *model.VerificationEntry, logger logr.Logger) error {
-	formdata, err := getFormData(vpToken, row)
+func postResponse(ctx context.Context, vpToken presentation.VPToken, row *model.VerificationEntry, logger logr.Logger) error {
+	if row == nil {
+		return errors.New("row empty")
+	}
+	if err := vpToken.ValidateAgainst(&row.DCQLQuery); err != nil {
+		return err
+	}
+
+	var formdata url.Values
+	switch row.ResponseMode {
+	case string(types.DirectPost):
+		var err error
+		formdata, err = getFormData(vpToken, row)
+		if err != nil {
+			return err
+		}
+	case string(types.DirectPostJwt):
+		response := presentation.AuthorizationResponse{VPToken: vpToken, State: row.AuthorizationState}
+		compact, err := (oid4vpResponseEncryptor{}).EncryptAuthorizationResponse(ctx, response, row.ClientMetadata)
+		if err != nil {
+			return fmt.Errorf("encrypt direct_post.jwt response: %w", err)
+		}
+		formdata = url.Values{"response": {compact}}
+	default:
+		return fmt.Errorf("unsupported response_mode %q", row.ResponseMode)
+	}
+
+	endpoint, err := validateOutboundURL(row.ResponseUri, commonTypes.GetEnvironment().GetConfig(), true)
+	if err != nil {
+		return fmt.Errorf("invalid response_uri: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), strings.NewReader(formdata.Encode()))
 	if err != nil {
 		return err
 	}
-	rep, err := GetHttpClient().PostForm(row.ResponseUri, formdata)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rep, err := externalHTTPClient(commonTypes.GetEnvironment().GetConfig()).Do(req)
 	if err != nil {
 		logger.Error(err, "Error during posting response", "responseUri", row.ResponseUri)
 		return err
@@ -318,67 +392,101 @@ func getFormData(vpToken presentation.VPToken, row *model.VerificationEntry) (ur
 	}
 	formdata := url.Values{}
 	formdata.Set("vp_token", encoded)
-	state, err := common.EncodeVerificationState(row.GroupId, row.RequestId)
-	if err != nil {
-		return nil, err
+	if row.AuthorizationState != "" {
+		formdata.Set("state", row.AuthorizationState)
 	}
-	formdata.Set("state", state)
 	return formdata, nil
 }
 
-func signerServiceSignLdpJson(payload model.ProofModel, logger logr.Logger, config *model.Config) (presentation.VPToken, error) {
-	presentations, err := fromProofModelToPresentation(payload, logger)
-	if err != nil {
-		return nil, err
-	}
-	if len(presentations) != len(payload.Payload) {
-		return nil, errors.New("presentation/query count mismatch")
-	}
-	result := make(presentation.VPToken, len(presentations))
-	for i, pres := range presentations {
-		signed, err := processPresentationData(nil, pres, logger, config)
-		if err != nil {
-			return nil, err
-		}
-		queryID := payload.Payload[i].Id
+func signerServiceSignPresentations(payload model.ProofModel, row *model.VerificationEntry, logger logr.Logger, config *model.Config) (presentation.VPToken, error) {
+	result := make(presentation.VPToken, len(payload.Payload))
+	for _, group := range payload.Payload {
+		queryID := group.Id
 		if queryID == "" {
 			return nil, errors.New("DCQL query id is required")
 		}
-		result[queryID] = append(result[queryID], json.RawMessage(signed))
+
+		switch group.Format {
+		case types.SDJWT:
+			if row == nil {
+				return nil, errors.New("SD-JWT presentation requires transaction audience and nonce")
+			}
+			for _, credential := range group.Credentials {
+				compact, ok := credential.(string)
+				if !ok {
+					return nil, fmt.Errorf("DCQL query %s contains a non-string SD-JWT credential", queryID)
+				}
+				request := map[string]interface{}{
+					"group": payload.SignGroup, "issuer": payload.HolderDid, "key": payload.SignKey,
+					"namespace": payload.SignNamespace, "presentation": compact,
+					"format": string(types.SDJWT), "aud": row.ClientId, "nonce": row.Nonce,
+					"disclosureFrame": []string{},
+				}
+				signed, err := processPresentationData(request, logger, config)
+				if err != nil {
+					return nil, err
+				}
+				result[queryID] = append(result[queryID], json.RawMessage(signed))
+			}
+		case types.LDPVC:
+			var verPres map[string]interface{}
+			filledTemplate := fmt.Sprintf(payloadtemplate, queryID, payload.HolderDid)
+			if err := json.Unmarshal([]byte(filledTemplate), &verPres); err != nil {
+				return nil, err
+			}
+			credentials := make([]interface{}, 0, len(group.Credentials))
+			for _, cred := range group.Credentials {
+				credentials = append(credentials, cred)
+			}
+			verPres["verifiableCredential"] = credentials
+			request := getSignerServiceProofPayload(payload.SignGroup, payload.HolderDid, payload.SignKey, payload.SignNamespace, verPres)
+			request["format"] = string(types.LDPVC)
+			if row != nil {
+				request["aud"] = row.ClientId
+				request["nonce"] = row.Nonce
+			}
+			signed, err := processPresentationData(request, logger, config)
+			if err != nil {
+				return nil, err
+			}
+			result[queryID] = append(result[queryID], json.RawMessage(signed))
+		default:
+			return nil, fmt.Errorf("unsupported presentation format %q for DCQL query %s", group.Format, queryID)
+		}
 	}
 	return result, nil
 }
 
-func processPresentationData(err error, presentation map[string]interface{}, logger logr.Logger, config *model.Config) ([]byte, error) {
-	p, err := json.Marshal(presentation)
-
+func processPresentationData(presentationRequest map[string]interface{}, logger logr.Logger, config *model.Config) ([]byte, error) {
+	p, err := json.Marshal(presentationRequest)
 	if err != nil {
-		logger.Error(err, "Error marshalling presentations.")
 		return nil, err
 	}
-
-	logger.Debug("sending presentation to sign", "presentation\n", string(p))
-
-	rep, err := http.DefaultClient.Post(config.SignerService.PresentationSignUrl, "application/json", bytes.NewBuffer(p))
-
+	endpoint, err := validateOutboundURL(config.SignerService.PresentationSignUrl, config, false)
 	if err != nil {
-		logger.Error(err, "Error during signer service call")
+		return nil, fmt.Errorf("invalid signer URL: %w", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, endpoint.String(), bytes.NewReader(p))
+	if err != nil {
 		return nil, err
 	}
-
-	respBody, err := io.ReadAll(rep.Body)
-
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	rep, err := secureHTTPClient().Do(req)
 	if err != nil {
-		logger.Error(err, "Error during response body read")
-		return nil, err
+		return nil, fmt.Errorf("signer service call failed: %w", err)
 	}
-
 	defer rep.Body.Close()
-
-	if rep.StatusCode != http.StatusOK {
-		return nil, errors.New("signer service call error. result was: " + string(respBody))
+	respBody, err := io.ReadAll(io.LimitReader(rep.Body, maxHTTPResponseBytes+1))
+	if err != nil {
+		return nil, err
 	}
-
+	if int64(len(respBody)) > maxHTTPResponseBytes {
+		return nil, errors.New("signer response exceeds size limit")
+	}
+	if rep.StatusCode < 200 || rep.StatusCode >= 300 {
+		return nil, fmt.Errorf("signer service returned HTTP %d: %s", rep.StatusCode, strings.TrimSpace(string(respBody)))
+	}
 	return respBody, nil
 }
 
