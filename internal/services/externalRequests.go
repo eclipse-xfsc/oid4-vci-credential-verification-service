@@ -28,7 +28,7 @@ func getRequestObject(request_uri string, outerClientID string, ctx context.Cont
 		return nil, errors.New("Unsupported HTTP Scheme for presentation definition.")
 	}*/
 
-	presRequest, err := sendRequestWithRedirects(requestUrl, ctx)
+	presRequest, err := sendRequestWithRedirects(requestUrl, ctx, outerClientID)
 	if err != nil {
 		logger.Error(err, "error getting request object for url "+requestUrl.String())
 		return nil, err
@@ -57,32 +57,47 @@ func parsePercentEncodedUrl(request_uri string, setHttpSchema bool) (*url.URL, e
 	return validated, nil
 }
 
-func sendRequestWithRedirects(url *url.URL, ctx context.Context) (*presentation.RequestObject, error) {
+func sendRequestWithRedirects(
+	url *url.URL,
+	ctx context.Context,
+	outerClientID string,
+) (*presentation.RequestObject, error) {
 	client := externalHTTPClient(common.GetEnvironment().GetConfig())
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
 	if err != nil {
 		return nil, errors.Join(errors.New("could not create request"), err)
 	}
 
-	// Never forward incoming Authorization/Cookie headers to an external verifier.
 	req.Header.Set("Accept", "application/jwt")
-	resp, err := client.Do(req)
-	if err == nil {
-		defer resp.Body.Close()
-	}
 
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, errors.Join(errors.New("could not send request"), err)
-	} else if resp.StatusCode >= http.StatusBadRequest {
-		var errBody = "<null>"
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= http.StatusBadRequest {
+		errBody := "<null>"
 		if body, er := io.ReadAll(io.LimitReader(resp.Body, 4096)); er == nil && len(body) > 0 {
 			errBody = string(body)
 		}
-		err = fmt.Errorf("request url %s returned status %s with data %s", url.String(), resp.Status, errBody)
-		return nil, err
-	} else if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
-		return nil, fmt.Errorf("redirects are forbidden for request_uri (HTTP %d)", resp.StatusCode)
+
+		return nil, fmt.Errorf(
+			"request url %s returned status %s with data %s",
+			url.String(),
+			resp.Status,
+			errBody,
+		)
 	}
+
+	if resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf(
+			"redirects are forbidden for request_uri (HTTP %d)",
+			resp.StatusCode,
+		)
+	}
+
 	return handleSuccessfulResponse(resp, outerClientID)
 }
 

@@ -36,9 +36,10 @@ type Config struct {
 		CredentialSelectionPolicy string `mapstructure:"credentialSelectionPolicy" envconfig:"CREDENTIALSELECTIONPOLICY"`
 	} `mapstructure:"externalpresentation"`
 	SignerService struct {
-		PresentationVerifyUrl string `mapstructure:"presentationVerifyUrl" envconfig:"PRESENTATIONVERIFYURL"`
-		PresentationSignUrl   string `mapstructure:"presentationSignUrl" envconfig:"PRESENTATIONSIGNURL"`
-		SignerTopic           string `mapstructure:"signerTopic" envconfig:"TOPIC"`
+		PresentationVerifyUrl  string `mapstructure:"presentationVerifyUrl" envconfig:"PRESENTATIONVERIFYURL"`
+		PresentationSignUrl    string `mapstructure:"presentationSignUrl" envconfig:"PRESENTATIONSIGNURL"`
+		RequestObjectVerifyUrl string `mapstructure:"requestObjectVerifyUrl" envconfig:"REQUESTOBJECTVERIFYURL"`
+		SignerTopic            string `mapstructure:"signerTopic" envconfig:"TOPIC"`
 	} `mapstructure:"signerService" envconfig:"SIGNER"`
 	Authorization       string                          `mapstructure:"authorization" envconfig:"AUTHORIZATION"`
 	AuthorizationReply  string                          `mapstructure:"authorizationReply" envconfig:"AUTHORIZATIONREPLY"`

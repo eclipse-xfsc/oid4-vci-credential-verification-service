@@ -400,60 +400,87 @@ func getFormData(vpToken presentation.VPToken, row *model.VerificationEntry) (ur
 
 func signerServiceSignPresentations(payload model.ProofModel, row *model.VerificationEntry, logger logr.Logger, config *model.Config) (presentation.VPToken, error) {
 	result := make(presentation.VPToken, len(payload.Payload))
+
 	for _, group := range payload.Payload {
 		queryID := group.Id
 		if queryID == "" {
 			return nil, errors.New("DCQL query id is required")
 		}
 
-		switch group.Format {
+		format := types.CredentialFormat(group.FormatType)
+		switch format {
 		case types.SDJWT:
 			if row == nil {
 				return nil, errors.New("SD-JWT presentation requires transaction audience and nonce")
 			}
-			for _, credential := range group.Credentials {
-				compact, ok := credential.(string)
+
+			for credentialID, credential := range group.Credentials {
+				compact, ok := credential.Data.(string)
 				if !ok {
-					return nil, fmt.Errorf("DCQL query %s contains a non-string SD-JWT credential", queryID)
+					return nil, fmt.Errorf("DCQL query %s credential %s contains a non-string SD-JWT credential (%T)", queryID, credentialID, credential.Data)
 				}
+
 				request := map[string]interface{}{
-					"group": payload.SignGroup, "issuer": payload.HolderDid, "key": payload.SignKey,
-					"namespace": payload.SignNamespace, "presentation": compact,
-					"format": string(types.SDJWT), "aud": row.ClientId, "nonce": row.Nonce,
+					"group":           payload.SignGroup,
+					"issuer":          payload.HolderDid,
+					"key":             payload.SignKey,
+					"namespace":       payload.SignNamespace,
+					"presentation":    compact,
+					"format":          string(types.SDJWT),
+					"aud":             row.ClientId,
+					"nonce":           row.Nonce,
 					"disclosureFrame": []string{},
 				}
+
 				signed, err := processPresentationData(request, logger, config)
 				if err != nil {
 					return nil, err
 				}
-				result[queryID] = append(result[queryID], json.RawMessage(signed))
+
+				// A dc+sd-jwt presentation is a compact string. VPToken stores JSON
+				// values as RawMessage, therefore it must be JSON-encoded first.
+				raw, err := json.Marshal(strings.TrimSpace(string(signed)))
+				if err != nil {
+					return nil, fmt.Errorf("marshal SD-JWT presentation for DCQL query %s: %w", queryID, err)
+				}
+				result[queryID] = append(result[queryID], raw)
 			}
+
 		case types.LDPVC:
 			var verPres map[string]interface{}
 			filledTemplate := fmt.Sprintf(payloadtemplate, queryID, payload.HolderDid)
 			if err := json.Unmarshal([]byte(filledTemplate), &verPres); err != nil {
 				return nil, err
 			}
+
 			credentials := make([]interface{}, 0, len(group.Credentials))
-			for _, cred := range group.Credentials {
-				credentials = append(credentials, cred)
+			for _, credential := range group.Credentials {
+				credentials = append(credentials, credential.Data)
 			}
 			verPres["verifiableCredential"] = credentials
+
 			request := getSignerServiceProofPayload(payload.SignGroup, payload.HolderDid, payload.SignKey, payload.SignNamespace, verPres)
 			request["format"] = string(types.LDPVC)
 			if row != nil {
 				request["aud"] = row.ClientId
 				request["nonce"] = row.Nonce
 			}
+
 			signed, err := processPresentationData(request, logger, config)
 			if err != nil {
 				return nil, err
 			}
-			result[queryID] = append(result[queryID], json.RawMessage(signed))
+			raw := json.RawMessage(bytes.TrimSpace(signed))
+			if !json.Valid(raw) {
+				return nil, fmt.Errorf("signer returned invalid JSON for LDP VC DCQL query %s", queryID)
+			}
+			result[queryID] = append(result[queryID], raw)
+
 		default:
-			return nil, fmt.Errorf("unsupported presentation format %q for DCQL query %s", group.Format, queryID)
+			return nil, fmt.Errorf("unsupported presentation format %q for DCQL query %s", group.FormatType, queryID)
 		}
 	}
+
 	return result, nil
 }
 
@@ -502,7 +529,7 @@ func fromProofModelToPresentation(payload model.ProofModel, logger logr.Logger) 
 		}
 		var credentials = make([]interface{}, 0)
 		for _, cred := range pres.Credentials {
-			credentials = append(credentials, cred)
+			credentials = append(credentials, cred.Data)
 		}
 		verPres["verifiableCredential"] = credentials
 		proof := getSignerServiceProofPayload(payload.SignGroup, payload.HolderDid, payload.SignKey, payload.SignNamespace, verPres)
