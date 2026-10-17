@@ -3,3 +3,4 @@
 /.vscode/
 *.tgz
 *.lock
+__debug_*
