@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
@@ -28,9 +29,15 @@ type AuthorizationHandler struct {
 	config    *model.Config
 }
 
-func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, config *model.Config, authUrl *url.URL) (string, error) {
+// ProcessedAuthorizationRequest contains the data needed by entry-point-specific flows.
+type ProcessedAuthorizationRequest struct {
+	State string
+	Nonce string
+}
+
+func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, config *model.Config) (*ProcessedAuthorizationRequest, error) {
 	if groupId == "" || requestId == "" {
-		return "", errors.New("groupId and requestId must not be empty")
+		return nil, errors.New("groupId and requestId must not be empty")
 	}
 	if config.ExternalPresentation.ClientIdPolicy != "" {
 		var clientIdObject map[string]interface{} = make(map[string]interface{})
@@ -39,28 +46,28 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 		res, err := GetPolicyResult(clientIdObject, config.ExternalPresentation.ClientIdPolicy)
 
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		if !policyAllows(res) {
-			return "", errors.New("policy forbids the processing")
+			return nil, errors.New("policy forbids the processing")
 		}
 	}
 
 	object, err := getRequestObject(request_uri, clientId, ctx)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if err := object.AuthorizationRequest.Validate(); err != nil {
-		return "", fmt.Errorf("invalid OID4VP request object: %w", err)
+		return nil, fmt.Errorf("invalid OID4VP request object: %w", err)
 	}
 	if clientId != object.ClientID {
-		return "", errors.New("client_id does not match request object")
+		return nil, errors.New("client_id does not match request object")
 	}
 
 	if object.ResponseMode != string(types.DirectPost) && object.ResponseMode != string(types.DirectPostJwt) {
-		return "", fmt.Errorf("unsupported response_mode %q", object.ResponseMode)
+		return nil, fmt.Errorf("unsupported response_mode %q", object.ResponseMode)
 	}
 
 	if config.ExternalPresentation.RequestObjectPolicy != "" {
@@ -68,38 +75,26 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 		res, err := GetPolicyResult(object, config.ExternalPresentation.RequestObjectPolicy)
 
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 
 		if !policyAllows(res) {
-			return "", errors.New("policy forbidds the processing")
+			return nil, errors.New("policy forbidds the processing")
 		}
-	}
-
-	if err != nil {
-		return "", errors.Join(
-			fmt.Errorf("could not parse AuthorizeEndpoint: %s", config.ExternalPresentation.AuthorizeEndpoint),
-			err,
-		)
 	}
 
 	state, err := serviceCommon.EncodeVerificationState(groupId, requestId)
 	if err != nil {
-		return "", errors.Join(errors.New("error creating verification state"), err)
+		return nil, errors.Join(errors.New("error creating verification state"), err)
 	}
 
 	err = serviceCommon.StoreRequest(ctx, requestId, tenantId, groupId, object)
 
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	query := authUrl.Query()
-	query.Add("presentation", state)
-	query.Add("nonce", object.Nonce)
-	authUrl.RawQuery = query.Encode()
-
-	return authUrl.String(), nil
+	return &ProcessedAuthorizationRequest{State: state, Nonce: object.Nonce}, nil
 }
 
 // HandleAuthorizationRequest godoc
@@ -134,20 +129,30 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 			if requestId == "" {
 				requestId = c.GetHeader("x-request-id")
 			}
-			redirect_uri, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, groupId, requestId, config, authUrl)
-
-			if err == nil {
-				handler.logger.Info("Redirect to: " + redirect_uri)
-				c.Redirect(302, redirect_uri)
-			} else {
+			processed, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, groupId, requestId, config)
+			if err != nil {
 				ErrorResponse(c, "Request could not be handled", err)
+				return
 			}
+			redirectURI := buildAuthorizationRedirect(authUrl, processed)
+			handler.logger.Info("Redirect to: " + redirectURI)
+			c.Redirect(http.StatusFound, redirectURI)
 		} else {
 			ErrorResponse(c, "Path Variable missing.", errors.ErrUnsupported)
 		}
 	} else {
 		ErrorResponse(c, "URI parameter missing.", errors.ErrUnsupported)
 	}
+}
+
+// buildAuthorizationRedirect constructs a local consent URL without mutating config URLs.
+func buildAuthorizationRedirect(authURL *url.URL, processed *ProcessedAuthorizationRequest) string {
+	redirectURL := *authURL
+	query := redirectURL.Query()
+	query.Set("presentation", processed.State)
+	query.Set("nonce", processed.Nonce)
+	redirectURL.RawQuery = query.Encode()
+	return redirectURL.String()
 }
 
 func ResolveAuthUrl(c *gin.Context, config *model.Config) (*url.URL, error) {
@@ -204,59 +209,89 @@ func (handler *AuthorizationHandler) Initialize(config *model.Config, logger log
 	return err
 }
 
-func (handler *AuthorizationHandler) receive(event event.Event) {
-
-	if event.Type() == messaging.PresentationAuthorizationRemoteType {
-		ctx := context.Background()
-		var remoteRequest messaging.PresentationAuthorizationRemoteRequest
-
-		err := json.Unmarshal(event.Data(), &remoteRequest)
-
-		if err != nil {
-			handler.logger.Error(err, "Error unmarshalling Remoterequest")
-			return
+// parseRemoteOID4VPURL extracts the untrusted outer client_id and request_uri.
+// Their binding and the Request Object signature are verified downstream.
+func parseRemoteOID4VPURL(raw string) (string, string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", "", errors.New("url is required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid OID4VP URL: %w", err)
+	}
+	if u.Scheme != "openid4vp" || u.Host != "" || u.Fragment != "" || u.User != nil {
+		return "", "", errors.New("expected openid4vp://? authorization request URL")
+	}
+	q, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid OID4VP query: %w", err)
+	}
+	for _, key := range []string{"client_id", "request_uri", "request"} {
+		if len(q[key]) > 1 {
+			return "", "", fmt.Errorf("duplicate OID4VP parameter %s", key)
 		}
-		authUrl, err := ResolveAuthUrl(nil, handler.config)
+	}
+	if len(q["request"]) != 0 {
+		return "", "", errors.New("inline request objects are not supported; use request_uri")
+	}
+	clientID := strings.TrimSpace(q.Get("client_id"))
+	requestURI := strings.TrimSpace(q.Get("request_uri"))
+	if clientID == "" || requestURI == "" {
+		return "", "", errors.New("client_id and request_uri are required")
+	}
+	parsed, err := url.Parse(requestURI)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil || parsed.Fragment != "" {
+		return "", "", errors.New("request_uri must be an absolute HTTP(S) URL")
+	}
+	// Outbound URL policy and SSRF restrictions are applied by getRequestObject.
+	return clientID, requestURI, nil
+}
 
-		headers := http.Header{}
-		headers.Add("X-NAMESPACE", remoteRequest.TenantId)
-		headers.Add("X-GROUP", remoteRequest.GroupId)
-		headers.Add("X-KEY", remoteRequest.Key)
-		headers.Add("X-DID", remoteRequest.Did)
-
-		ctx = context.WithValue(ctx, HeaderContextKey, headers)
-
-		_, err = handler.HandleRequestObject(ctx, remoteRequest.ClientId, remoteRequest.RequestUri, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, handler.config, authUrl)
-
-		if err != nil {
-			handler.logger.Error(err, "Error during request object handling")
-			return
-		}
-
-		resp := messaging.PresentationAuthorizationRemoteReply{
-			Reply: common.Reply{
-				RequestId: remoteRequest.RequestId,
-				TenantId:  remoteRequest.TenantId,
-			},
-		}
-
-		b, err := json.Marshal(resp)
-
-		if err != nil {
-			handler.logger.Error(err, "error in json marshalling", err)
-			return
-		}
-
-		e, err := cloudeventprovider.NewEvent(handler.config.AuthorizationReply, messaging.PresentationAuthorizationRemoteType, b)
-		if err != nil {
-			handler.logger.Error(err, "Error during object publication handling")
-		}
-		//Publish New Record
-		err = handler.pubClient.PubCtx(ctx, e)
-
-		if err != nil {
-			handler.logger.Error(err, "Error during object publication handling")
-		}
+func (handler *AuthorizationHandler) receive(ev event.Event) {
+	if ev.Type() != messaging.PresentationAuthorizationRemoteType {
+		return
+	}
+	ctx := context.Background()
+	var remoteRequest messaging.PresentationAuthorizationRemoteRequest
+	if err := json.Unmarshal(ev.Data(), &remoteRequest); err != nil {
+		handler.logger.Error(err, "Invalid remote authorization CloudEvent payload")
+		return
+	}
+	if strings.TrimSpace(remoteRequest.TenantId) == "" || strings.TrimSpace(remoteRequest.GroupId) == "" || strings.TrimSpace(remoteRequest.RequestId) == "" {
+		handler.logger.Error(errors.New("tenantId, groupId and requestId are required"), "Invalid remote authorization context")
+		return
+	}
+	clientID, requestURI, err := parseRemoteOID4VPURL(remoteRequest.URL)
+	if err != nil {
+		handler.logger.Error(err, "Invalid OID4VP link")
+		return
+	}
+	headers := http.Header{}
+	headers.Set("X-NAMESPACE", remoteRequest.TenantId)
+	headers.Set("X-GROUP", remoteRequest.GroupId)
+	headers.Set("X-KEY", remoteRequest.Key)
+	headers.Set("X-DID", remoteRequest.Did)
+	ctx = context.WithValue(ctx, HeaderContextKey, headers)
+	_, err = handler.HandleRequestObject(ctx, clientID, requestURI, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, handler.config)
+	if err != nil {
+		handler.logger.Error(err, "Error during request object handling")
+		return
+	}
+	resp := messaging.PresentationAuthorizationRemoteReply{Reply: common.Reply{
+		RequestId: remoteRequest.RequestId, TenantId: remoteRequest.TenantId,
+	}}
+	b, err := json.Marshal(resp)
+	if err != nil {
+		handler.logger.Error(err, "Error marshaling remote authorization reply")
+		return
+	}
+	e, err := cloudeventprovider.NewEvent(handler.config.AuthorizationReply, messaging.PresentationAuthorizationRemoteType, b)
+	if err != nil {
+		handler.logger.Error(err, "Error creating remote authorization reply")
+		return
+	}
+	if err := handler.pubClient.PubCtx(ctx, e); err != nil {
+		handler.logger.Error(err, "Error publishing remote authorization reply")
 	}
 }
 

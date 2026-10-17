@@ -106,8 +106,8 @@ func GetHttpClient() *http.Client { return secureHTTPClient() }
 func handleSuccessfulResponse(resp *http.Response, outerClientID string) (*presentation.RequestObject, error) {
 	var object = presentation.RequestObject{}
 	cT, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil || cT != "application/jwt" {
-		return nil, fmt.Errorf("unsupported response Content-Type `%s`, expected `application/jwt`", resp.Header.Get("Content-Type"))
+	if err != nil || cT != "application/oauth-authz-req+jwt" {
+		return nil, fmt.Errorf("unsupported response Content-Type `%s`, expected `application/oauth-authz-req+jwt`", resp.Header.Get("Content-Type"))
 	}
 	defer resp.Body.Close()
 

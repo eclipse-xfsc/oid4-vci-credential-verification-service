@@ -113,7 +113,7 @@ spec:
               value: {{ .Values.config.signer.topic | quote }}
             - name: CREDENTIALVERIFICATION_STORAGE_TOPIC
               value: {{ .Values.config.topics.storageRequest | quote }}
-            - name: DID_RESOLVER
+            - name: CREDENTIALVERIFICATION_DID_RESOLVER
               value: {{ .Values.config.didResolver | quote }}
             {{- else }}
             # Cassandra credentials are backed by the ResourceClaim/ExternalSecret.

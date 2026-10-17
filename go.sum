@@ -72,6 +72,10 @@ github.com/eclipse-xfsc/did-core v1.1.0 h1:qyJhqyTQ7Svfq9sJ0R5XJBdbfq5OWKUyLf2BG
 github.com/eclipse-xfsc/did-core v1.1.0/go.mod h1:phsq2M1icllbtRxENojD6QVtcpZmdiu2T9MSuu2d9ac=
 github.com/eclipse-xfsc/did-core/v2 v2.1.0 h1:56fifKCHqw2WrCxBC3PERRh0Qqv+rd9gg+9QRYADnDU=
 github.com/eclipse-xfsc/did-core/v2 v2.1.0/go.mod h1:JvGH0Au3l53zPJ4ear8OOVuInjeJ/G+olYyLQAj5g/c=
+github.com/eclipse-xfsc/did-core/v2 v2.1.1 h1:HqKKvr+zpjQCj139EOqm7ZJHwWsSKYPLfBiebzNSPLw=
+github.com/eclipse-xfsc/did-core/v2 v2.1.1/go.mod h1:JvGH0Au3l53zPJ4ear8OOVuInjeJ/G+olYyLQAj5g/c=
+github.com/eclipse-xfsc/did-core/v2 v2.2.0 h1:Dc90XIcXmpobkBHMJr1lk94nEaOWD89zsarwjO+sd+A=
+github.com/eclipse-xfsc/did-core/v2 v2.2.0/go.mod h1:ZE7o6qC16rN3gH6wFy2I9R1CcXGUHM1AgteISptQWeU=
 github.com/eclipse-xfsc/microservice-core-go v1.1.2 h1:B4Svh4+CzH4k67BSnT3tUnS84VX74VQk+S4OWOWRCuU=
 github.com/eclipse-xfsc/microservice-core-go v1.1.2/go.mod h1:YRLyt66TYC1Km40w6oagYrXjrMCyI1tym2wGEgWQ9pI=
 github.com/eclipse-xfsc/nats-message-library v1.5.0 h1:lazecSf2LLBw9HTVUUkaC6jghIGoRvg9JFxcMoJOdTo=
@@ -81,6 +85,12 @@ github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.2/go.mod h1:7p0Pr9dqpxru5Tj8+hh
 github.com/eclipse-xfsc/ssi-jwt v1.2.1/go.mod h1:sYdF2Y0BYEjui8QD++K0kti+8N0riH+aTlf+ynjmQFw=
 github.com/eclipse-xfsc/ssi-jwt/v2 v2.2.0 h1:JDsx/iPimPGWnBy1qvVDc2vvWmyS/yY0Fo4X+lbAYA4=
 github.com/eclipse-xfsc/ssi-jwt/v2 v2.2.0/go.mod h1:AanSJ720LclsvKfLgB5U4LnnIAAAMAcI949ILddY3EA=
+github.com/eclipse-xfsc/ssi-jwt/v2 v2.3.2 h1:2uLDPCBDyM3kcfylhjfAbtdwJwwhlvKFRTT5cli1Hmo=
+github.com/eclipse-xfsc/ssi-jwt/v2 v2.3.2/go.mod h1:QyrDUGVP/X/tCwxQZNNJrLe1hv/pOy40col0nSejd8M=
+github.com/eclipse-xfsc/ssi-jwt/v2 v2.3.3 h1:03TdNO3T188tp3tusW4YlnO32nBujaMSW0tffAqbo7w=
+github.com/eclipse-xfsc/ssi-jwt/v2 v2.3.3/go.mod h1:ZjEJ6ByDRQx15W+KAyIhtyCWTZb1xG9FRMOkzDsHs7U=
+github.com/eclipse-xfsc/ssi-jwt/v2 v2.3.4 h1:YtIXBaYRX7SlFCzkKbHN2GiGt9SrCkbP/aqzkx/wWlo=
+github.com/eclipse-xfsc/ssi-jwt/v2 v2.3.4/go.mod h1:z8TMa5rnSrhKAtmT3c+zGru42ckBWU5mF0jlK1KZaN4=
 github.com/eclipse-xfsc/train-trusted-content-resolver/clients/go v1.0.0/go.mod h1:MyFwkTK+RH7rd7ZkoFrhlajmKaj3WJgPJBTB3DLOSnQ=
 github.com/eclipse/paho.golang v0.12.0 h1:EXQFJbJklDnUqW6lyAknMWRhM2NgpHxwrrL8riUmp3Q=
 github.com/eclipse/paho.golang v0.12.0/go.mod h1:TSDCUivu9JnoR9Hl+H7sQMcHkejWH2/xKK1NJGtLbIE=
@@ -238,6 +248,8 @@ github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd/go.mod h1:6dJ
 github.com/modern-go/reflect2 v1.0.2 h1:xBagoLtFs94CBntxluKeaWgTMpvLxC4ur3nMaC9Gz0M=
 github.com/modern-go/reflect2 v1.0.2/go.mod h1:yWuevngMOJpCy52FWWMvUC8ws7m/LJsjYzDa0/r8luk=
 github.com/mr-tron/base58 v1.2.0/go.mod h1:BinMc/sQntlIE1frQmRFPUoPA1Zkr8VRgBdjWI2mNwc=
+github.com/mr-tron/base58 v1.3.0 h1:K6Y13R2h+dku0wOqKtecgRnBUBPrZzLZy5aIj8lCcJI=
+github.com/mr-tron/base58 v1.3.0/go.mod h1:2BuubE67DCSWwVfx37JWNG8emOC0sHEU4/HpcYgCLX8=
 github.com/multiformats/go-base32 v0.1.0/go.mod h1:Kj3tFY6zNr+ABYMqeUNeGvkIC/UYgtWibDcT0rExnbI=
 github.com/multiformats/go-base36 v0.1.0/go.mod h1:kFGE83c6s80PklsHO9sRn2NCoffoRdUUOENyW/Vv6sM=
 github.com/multiformats/go-multibase v0.1.1/go.mod h1:ZEjHE+IsUrgp5mhlEAYjMtZwK1k4haNkcaPg9aoe1a8=

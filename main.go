@@ -47,11 +47,14 @@ func connectDb() error {
 func main() {
 	// The DID library expects the unprefixed variable. Preserve an explicit
 	// DID_RESOLVER override, otherwise use the injected provider output.
-	if injected, ok := os.LookupEnv("CREDENTIALVERIFICATION_DID_RESOLVER"); ok {
-		if _, explicitlyConfigured := os.LookupEnv("DID_RESOLVER"); !explicitlyConfigured {
-			_ = os.Setenv("DID_RESOLVER", injected)
-		}
+	injected, ok := os.LookupEnv("CREDENTIALVERIFICATION_DID_RESOLVER")
+
+	if !ok {
+		log.Fatalf("did resolver required  %t", "CREDENTIALVERIFICATION_DID_RESOLVER not set")
 	}
+
+	_ = os.Setenv("DID_RESOLVER", injected)
+
 	env = common.GetEnvironment()
 	var config model.Config
 	err := conf.LoadConfig("CREDENTIALVERIFICATION", &config, nil)

@@ -30,11 +30,12 @@ type PresentationAuthorizationCreationReply struct {
 
 type PresentationAuthorizationRemoteRequest struct {
 	common.Request
-	ClientId   string `json:"clientId"`
-	RequestUri string `json:"request_uri"`
-	Ttl        int    `json:"ttl"`
-	Did        string `json:"did"`
-	Key        string `json:"key"`
+
+	URL string `json:"url"`
+
+	Ttl int    `json:"ttl,omitempty"`
+	Did string `json:"did,omitempty"`
+	Key string `json:"key,omitempty"`
 }
 
 type PresentationAuthorizationRemoteReply struct {
