@@ -36,7 +36,13 @@ type ProcessedAuthorizationRequest struct {
 	Nonce string
 }
 
-func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, config *model.Config) (*ProcessedAuthorizationRequest, error) {
+func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, consentMode string, ttl int, config *model.Config) (*ProcessedAuthorizationRequest, error) {
+	if consentMode != model.ConsentManual && consentMode != model.ConsentAuto {
+		return nil, errors.New("consentMode must be manual or auto")
+	}
+	if ttl <= 0 || ttl > 86400 {
+		return nil, errors.New("ttl must be 1..86400 seconds")
+	}
 	if groupId == "" || requestId == "" {
 		return nil, errors.New("groupId and requestId must not be empty")
 	}
@@ -89,7 +95,14 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 		return nil, errors.Join(errors.New("error creating verification state"), err)
 	}
 
-	err = serviceCommon.StoreRequest(ctx, requestId, tenantId, groupId, object)
+	blocked, err := serviceCommon.IsVerifierBlocked(ctx, tenantId, groupId, object.ClientID)
+	if err != nil {
+		return nil, err
+	}
+	if blocked {
+		return nil, errors.New("verifier is blocked")
+	}
+	err = serviceCommon.StoreRequest(ctx, requestId, tenantId, groupId, consentMode, ttl, object)
 
 	if err != nil {
 		return nil, err
@@ -130,7 +143,7 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 			if requestId == "" {
 				requestId = c.GetHeader("x-request-id")
 			}
-			processed, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, groupId, requestId, config)
+			processed, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, groupId, requestId, model.ConsentManual, 3600, config)
 			if err != nil {
 				shared.ErrorResponse(c, "Request could not be handled", err)
 				return
@@ -262,6 +275,9 @@ func (handler *AuthorizationHandler) receive(ev event.Event) {
 		handler.logger.Error(errors.New("tenantId, groupId and requestId are required"), "Invalid remote authorization context")
 		return
 	}
+	if remoteRequest.Ttl == 0 {
+		remoteRequest.Ttl = 3600
+	}
 	clientID, requestURI, err := parseRemoteOID4VPURL(remoteRequest.URL)
 	if err != nil {
 		handler.logger.Error(err, "Invalid OID4VP link")
@@ -273,10 +289,23 @@ func (handler *AuthorizationHandler) receive(ev event.Event) {
 	headers.Set("X-KEY", remoteRequest.Key)
 	headers.Set("X-DID", remoteRequest.Did)
 	ctx = context.WithValue(ctx, HeaderContextKey, headers)
-	processed, err := handler.HandleRequestObject(ctx, clientID, requestURI, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, handler.config)
+	processed, err := handler.HandleRequestObject(ctx, clientID, requestURI, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, remoteRequest.ConsentMode, remoteRequest.Ttl, handler.config)
 	if err != nil {
 		handler.logger.Error(err, "Error during request object handling")
 		return
+	}
+	if remoteRequest.ConsentMode == model.ConsentAuto {
+		row, err := serviceCommon.GetEntryFromDb(ctx, remoteRequest.TenantId, processed.State)
+		if err != nil {
+			handler.logger.Error(err, "Cannot reload auto consent request")
+		} else {
+			go func() {
+				sign := model.FulfillPresentationRequest{HolderDid: remoteRequest.Did, SignKey: remoteRequest.Key, SignNamespace: remoteRequest.TenantId, SignGroup: remoteRequest.GroupId}
+				if err := AutoConsent(context.Background(), handler.config, row, sign); err != nil {
+					handler.logger.Error(err, "Auto consent processing failed")
+				}
+			}()
+		}
 	}
 	resp := messaging.PresentationAuthorizationRemoteReply{Reply: common.Reply{
 		RequestId: remoteRequest.RequestId, TenantId: remoteRequest.TenantId,
@@ -310,4 +339,13 @@ func (handler *AuthorizationHandler) Close() {
 
 func (handler *AuthorizationHandler) Alive() bool {
 	return handler.client.Alive()
+}
+
+// IntakeLink resolves and stores an OID4VP link without issuing a browser redirect.
+func (handler *AuthorizationHandler) IntakeLink(ctx context.Context, raw, tenant, group, requestID, mode string, ttl int, cfg *model.Config) (*ProcessedAuthorizationRequest, error) {
+	client, uri, err := parseRemoteOID4VPURL(raw)
+	if err != nil {
+		return nil, err
+	}
+	return handler.HandleRequestObject(ctx, client, uri, tenant, group, requestID, mode, ttl, cfg)
 }

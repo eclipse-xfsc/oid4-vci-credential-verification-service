@@ -100,6 +100,10 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 		shared.ErrorResponse(ctx, RecordNotFoundError, err)
 		return
 	}
+	if row.ConsentMode == model.ConsentManual || row.ConsentMode == model.ConsentAuto {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "use consent workflow"})
+		return
+	}
 	acquired, err := common.TryBeginFulfillment(context, row)
 	if err != nil {
 		shared.ErrorResponse(ctx, "Cannot lock fulfillment", err)
@@ -160,6 +164,10 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 	var request model.FulfillPresentationRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
 		shared.ErrorResponse(ctx, BodyError, err)
+		return
+	}
+	if row.ConsentMode == model.ConsentManual || row.ConsentMode == model.ConsentAuto {
+		ctx.JSON(http.StatusForbidden, gin.H{"error": "use the consent-specific approval or policy workflow"})
 		return
 	}
 	if request.HolderDid == "" || request.SignKey == "" {

@@ -84,3 +84,8 @@ func resolveCredentials(ctx context.Context, cfg *model.Config, row *model.Verif
 	}
 	return result.Groups, nil
 }
+
+// GetCredentialCandidates exposes server-side DCQL matches to the authenticated wallet.
+func GetCredentialCandidates(ctx context.Context, cfg *model.Config, row *model.VerificationEntry) ([]presentation.FilterResult, error) {
+	return resolveCredentials(ctx, cfg, row)
+}

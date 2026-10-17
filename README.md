@@ -529,3 +529,427 @@ For `direct_post.jwt`, the service builds the same OID4VP `AuthorizationResponse
 The Request Object signature key and the Authorization Response encryption key have different purposes. A DID verification method (`kid` in the Request Object JWS) authenticates the Request Object. `client_metadata.jwks` supplies the Verifier's response-encryption key and is never used as a replacement for Request Object signature verification.
 
 A request using an unsupported response mode, encryption key type, key agreement algorithm, or content-encryption algorithm fails closed. Credential format selection remains in the presentation builder and is not inferred from `response_mode`.
+
+OID4VP Holder Architecture
+
+The XFSC Holder supports both human-operated wallets and machine-to-machine (M2M) presentations.
+
+Both workflows share the same OID4VP request validation, persistent storage, credential matching, and presentation fulfillment logic. The consent process differs depending on the mode assigned when the authorization request is submitted.
+
+Architecture Overview
+
+flowchart TD
+    A["OID4VP Authorization Request"]
+    A --> B["HTTP Intake<br/>Web Wallet"]
+    A --> C["NATS Intake<br/>Machine Holder"]
+    B --> D["Validate Authorization Request"]
+    C --> D
+    D --> E[("Presentation Request Store<br/>tenantId + groupId")]
+    E --> F{"Consent Mode"}
+    F -->|manual| G["Web Wallet<br/>Presentation Inbox"]
+    F -->|auto| H["Policy Client"]
+    G --> I{"User Decision"}
+    I -->|Approve| J["PresentationSelection"]
+    I -->|Reject| K["Status: rejected"]
+    H -->|"DCQL + Credential IDs"| L{"Policy Decision"}
+    L -->|Approved| J
+    L -->|Rejected| K
+    J --> M["Shared Fulfillment"]
+    M --> N["Validate DCQL Selection"]
+    N --> O["Generate VP Token"]
+    O --> P["Send OID4VP Response"]
+    P --> Q["Verifier"]
+    K --> R["Remove from Pending Inbox"]
+    style A fill:#e3f2fd,stroke:#1565c0
+    style E fill:#fff3e0,stroke:#ef6c00
+    style F fill:#f3e5f5,stroke:#7b1fa2
+    style G fill:#e8f5e9,stroke:#2e7d32
+    style H fill:#e8f5e9,stroke:#2e7d32
+    style J fill:#e8f5e9,stroke:#2e7d32
+    style K fill:#ffebee,stroke:#c62828
+    style M fill:#e3f2fd,stroke:#1565c0
+    style Q fill:#e3f2fd,stroke:#1565c0
+
+1. Authorization Request Intake
+
+OID4VP authorization requests can enter the Holder Service through two interfaces.
+
+HTTP Intake (Web Wallet)
+
+A human holder submits an OID4VP authorization URL through the Web Wallet.
+
+The request is validated and stored with consentMode=manual.
+
+NATS Intake (Machine Holder)
+
+A machine agent submits an OID4VP authorization URL using a NATS CloudEvent.
+
+The request is validated and stored with consentMode=auto.
+
+Both interfaces use the same internal request-processing logic.
+
+2. Presentation Request Storage
+
+Validated requests are stored in Cassandra and associated with their respective tenantId and groupId.
+
+Each request contains:
+
+Field	Description
+presentationId	Unique internal presentation request identifier
+tenantId	Tenant identifier
+groupId	Holder account identifier
+consentMode	manual or auto
+status	Current processing status
+dcqlQuery	Original DCQL query
+clientId	Verified verifier identifier
+namespace	Cryptographic key namespace
+group	Cryptographic key group
+
+The consent mode is assigned during request creation and cannot be changed afterward.
+
+Cassandra TTL automatically removes expired presentation requests.
+
+Supported statuses:
+
+* pending
+* processing
+* completed
+* rejected
+* failed
+* blocked
+
+3. Manual Consent — Human Holder
+
+Requests with consentMode=manual are made available through the Web Wallet.
+
+The wallet retrieves pending requests for the current tenantId and groupId.
+
+The holder can:
+
+1. View incoming presentation requests.
+2. Inspect the verifier and requested credentials.
+3. Retrieve matching credentials and valid DCQL combinations.
+4. Select credentials and permitted claims.
+5. Approve or reject individual requests.
+6. Block unwanted verifiers.
+
+Approval
+
+The wallet submits a PresentationSelection containing the selected credentials and claims.
+
+The Holder Service validates the selection against the original DCQL query and initiates presentation fulfillment.
+
+Rejection
+
+The request status changes to rejected.
+
+Rejected requests disappear from the pending inbox and cannot subsequently be approved.
+
+4. Automatic Consent — Machine Holder
+
+Requests with consentMode=auto are processed without user interaction.
+
+The Holder Service:
+
+1. Retrieves matching credentials from Credential Storage.
+2. Sends the original DCQL query, available credential IDs, and holder context to the Policy Client.
+3. Receives a PresentationSelection or rejection.
+4. Validates the returned selection.
+5. Initiates presentation fulfillment.
+
+The Policy Client is responsible for the automatic consent decision.
+
+The Holder Service does not implement a separate consent rule engine.
+
+5. PresentationSelection
+
+Both consent modes produce the same selection structure.
+
+{
+  "presentationId": "presentation-123",
+  "approved": true,
+  "selections": [
+    {
+      "queryId": "identity",
+      "credentialId": "credential-123",
+      "claimIds": [
+        "given_name",
+        "family_name"
+      ]
+    }
+  ]
+}
+
+Field	Description
+presentationId	Reference to the stored authorization request
+approved	Consent decision
+queryId	Credential query identifier from DCQL
+credentialId	Selected credential identifier from storage
+claimIds	Selected DCQL claim identifiers
+
+The Holder Service validates the selection against the stored authorization request before generating the presentation.
+
+6. Shared Presentation Fulfillment
+
+Manual and automatic consent use the same fulfillment pipeline.
+
+PresentationSelection
+        |
+        v
+Load Stored Authorization Request
+        |
+        v
+Validate Credential Selection against DCQL
+        |
+        v
+Load Selected Credentials
+        |
+        v
+Generate and Sign VP Token
+        |
+        v
+Build OID4VP Authorization Response
+        |
+        v
+Send Response to Verifier
+
+The fulfillment process supports the applicable OID4VP response mode, including direct_post and direct_post.jwt.
+
+The verifier receives the VP Token according to the original authorization request.
+
+7. Security and Isolation
+
+The Holder Service uses the following context:
+
+Parameter	Purpose
+tenantId	Tenant isolation
+groupId	Holder account isolation
+namespace	Crypto Provider key namespace
+group	Crypto Provider key group
+
+The context is provided by the surrounding XFSC infrastructure.
+
+The service does not implement its own authentication or account management.
+
+The following rules apply:
+
+* Consent mode cannot be modified after request creation.
+* Manual consent cannot approve an automatic request.
+* Automatic consent cannot process a manual request.
+* Credential selections must satisfy the original DCQL query.
+* Only credentials belonging to the corresponding holder context may be presented.
+* Requests can only be fulfilled once.
+* Blocked verifiers cannot create new actionable presentation requests.
+* Rejected requests cannot be approved later.
+* Cassandra TTL controls request retention.
+
+8. Design Principles
+
+The architecture follows four principles:
+
+Transport independence: HTTP and NATS use the same request-processing core.
+
+Consent separation: Human consent is managed by the Web Wallet; machine consent is delegated to the Policy Client.
+
+Immutable request context: Consent mode and holder context are persisted when the request is created.
+
+Shared fulfillment: All approved requests use the same DCQL validation, credential loading, VP generation, and OID4VP response pipeline.
+
+# OID4VP Holder Architecture
+
+The XFSC Holder supports **human-operated wallets** and **machine-to-machine (M2M) presentations**. Both flows share authorization request validation, storage, credential matching, and presentation fulfillment. Consent is determined by the immutable `consentMode` assigned at intake.
+
+## Architecture Overview
+
+```mermaid
+flowchart TD
+    A["OID4VP Authorization Request"]
+    A --> B["HTTP Intake<br/>Web Wallet"]
+    A --> C["NATS Intake<br/>Machine Holder"]
+    B --> D["Validate Authorization Request"]
+    C --> D
+    D --> E[("Presentation Request Store<br/>tenantId + groupId")]
+    E --> F{"Consent Mode"}
+    F -->|manual| G["Web Wallet<br/>Presentation Inbox"]
+    F -->|auto| H["Policy Client"]
+    G --> I{"User Decision"}
+    I -->|Approve| J["PresentationSelection"]
+    I -->|Reject| K["Status: rejected"]
+    H -->|"DCQL + Credential IDs"| L{"Policy Decision"}
+    L -->|Approved| J
+    L -->|Rejected| K
+    J --> M["Shared Fulfillment"]
+    M --> N["Validate DCQL Selection"]
+    N --> O["Generate VP Token"]
+    O --> P["Send OID4VP Response"]
+    P --> Q["Verifier"]
+    K --> R["Remove from Pending Inbox"]
+
+    style A fill:#e3f2fd,stroke:#1565c0
+    style E fill:#fff3e0,stroke:#ef6c00
+    style F fill:#f3e5f5,stroke:#7b1fa2
+    style G fill:#e8f5e9,stroke:#2e7d32
+    style H fill:#e8f5e9,stroke:#2e7d32
+    style J fill:#e8f5e9,stroke:#2e7d32
+    style K fill:#ffebee,stroke:#c62828
+    style M fill:#e3f2fd,stroke:#1565c0
+    style Q fill:#e3f2fd,stroke:#1565c0
+```
+
+## 1. Authorization Request Intake
+
+### HTTP Intake — Human Holder
+
+The Web Wallet submits a complete OID4VP authorization URL via HTTP. The service validates the request and stores it with `consentMode=manual`.
+
+The HTTP API follows the microservice routing convention:
+
+```http
+POST /v1/{tenantId}/api/presentation/presentations
+```
+
+The surrounding infrastructure supplies the context through the route and headers (`x-tenantid`, `x-groupid`, `x-namespace`, `x-group`, and optionally `x-host`). The tenant ID in the route and header must agree when both are supplied.
+
+### NATS Intake — Machine Holder
+
+A machine agent submits an OID4VP authorization URL through a NATS CloudEvent, using the event type `verifier.presentation.authorization.remote` on the `presentation.authorisation` subject. The request is validated and stored with `consentMode=auto`.
+
+The transport does not inherently determine consent: a trusted caller explicitly assigns `manual` or `auto` at intake. Both transports use the same request-processing core.
+
+## 2. Presentation Request Storage
+
+Validated requests are stored in Cassandra, isolated by `tenantId` and `groupId`.
+
+| Field | Description |
+|---|---|
+| `presentationId` | Internal request identifier |
+| `tenantId` | Tenant identifier |
+| `groupId` | Holder account identifier |
+| `namespace` | Cryptographic key namespace |
+| `group` | Cryptographic key group |
+| `consentMode` | Immutable `manual` or `auto` |
+| `status` | Processing status |
+| `dcqlQuery` | Requested credentials and claims |
+| `clientId` | Verified verifier identifier |
+| `expiresAt` | Request expiration time |
+
+Supported statuses: `pending`, `processing`, `completed`, `rejected`, `failed`, and `blocked`.
+
+Rejected requests are **not deleted immediately**. They are marked `rejected` and removed from the pending inbox. Cassandra TTL handles eventual removal. Status changes must preserve the remaining TTL.
+
+## 3. Manual Consent — Human Holder
+
+Requests with `consentMode=manual` appear in the Web Wallet's presentation inbox, scoped to the current `tenantId` and `groupId`.
+
+The holder can:
+
+1. View pending presentation requests and the verifier identity.
+2. Inspect DCQL requirements and matching credential candidates.
+3. Select credentials and permitted claim disclosures.
+4. Approve or reject a request.
+5. Block unwanted verifiers.
+
+**Approve:** The wallet submits a `PresentationSelection`. The service validates it against the stored request before fulfillment.
+
+**Reject:** The service atomically changes the status to `rejected`. The request disappears from the pending inbox and cannot subsequently be approved.
+
+## 4. Automatic Consent — Machine Holder
+
+Requests with `consentMode=auto` are evaluated without human interaction:
+
+1. Retrieve matching credentials from Credential Storage.
+2. Send the original DCQL query, matching credential IDs, and holder/verifier context to the external Policy Client.
+3. Receive an approved `PresentationSelection` or a denial.
+4. Validate the returned selection against the original DCQL query and holder scope.
+5. Fulfill approved requests; mark denied requests as `rejected`.
+
+The **Policy Client decides consent**. The Holder Service does not implement a separate policy engine.
+
+## 5. PresentationSelection
+
+Both consent modes produce the same structure:
+
+```json
+{
+  "presentationId": "presentation-123",
+  "approved": true,
+  "selections": [
+    {
+      "queryId": "identity",
+      "credentialId": "credential-123",
+      "claimIds": ["given_name", "family_name"]
+    }
+  ]
+}
+```
+
+| Field | Description |
+|---|---|
+| `presentationId` | Stored authorization request |
+| `approved` | Consent decision |
+| `queryId` | DCQL credential query identifier |
+| `credentialId` | Selected credential from storage |
+| `claimIds` | Selected DCQL claim identifiers, when applicable |
+
+Selections must satisfy DCQL credential queries, `credential_sets`, claim constraints, and `claim_sets`. The service must not silently disclose claims that were not selected.
+
+## 6. Shared Presentation Fulfillment
+
+```text
+PresentationSelection
+        |
+        v
+Load Stored Authorization Request
+        |
+        v
+Validate Selection against DCQL
+        |
+        v
+Load Selected Credentials
+        |
+        v
+Generate VP Token / Required Proofs
+        |
+        v
+Build OID4VP Authorization Response
+        |
+        v
+Send Response to Verifier
+```
+
+The service constructs the response according to the authorization request, including `direct_post` and, where applicable, encrypted `direct_post.jwt`. DCQL-based OID4VP responses use `vp_token` rather than `presentation_submission`.
+
+## 7. Holder Context and Isolation
+
+| Parameter | Purpose | HTTP source |
+|---|---|---|
+| `tenantId` | Tenant isolation | `/v1/{tenantId}` and `x-tenantid` |
+| `groupId` | Holder account isolation | `x-groupid` |
+| `namespace` | Crypto Provider key namespace | `x-namespace` |
+| `group` | Crypto Provider key group | `x-group` |
+| `host` | Original host, where needed | `x-host` |
+
+The context is supplied by trusted XFSC infrastructure. The Holder Service does **not** implement its own authentication or account management. The gateway must overwrite untrusted client-provided context headers, and direct public access to the service must be restricted. NATS publishers must likewise be authorized to assert their supplied context.
+
+The complete context is persisted at intake and reused for fulfillment. `groupId` (holder account) and `group` (key group) are distinct values.
+
+## 8. Security and Lifecycle Rules
+
+- Consent mode and holder context are immutable after intake.
+- Manual requests are decided through the Web Wallet; automatic requests through the Policy Client.
+- Credential selections must satisfy the stored DCQL request and holder ownership constraints.
+- Presentation requests are fulfilled at most once, using atomic status transitions.
+- Rejected and blocked requests cannot later be approved.
+- Blocking a verifier prevents new actionable requests and closes pending ones in the same holder scope.
+- Expiration is enforced from the authorization request and stored `expiresAt`; Cassandra TTL handles retention.
+- Cryptographic proof generation uses the stored `namespace` and `group` rather than assuming they equal `tenantId` and `groupId`.
+
+## 9. Design Principles
+
+**Transport independence:** HTTP and NATS share one request-processing core.
+
+**Consent separation:** The Web Wallet manages human consent; the external Policy Client decides machine consent.
+
+**Immutable context:** Consent mode and holder context are fixed at request creation.
+
+**Shared fulfillment:** Both approved flows use the same DCQL validation, credential loading, proof generation, and OID4VP response pipeline.

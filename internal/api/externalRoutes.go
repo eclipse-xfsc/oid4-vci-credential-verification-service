@@ -34,6 +34,8 @@ func AddExternalRoutes(server *core.Server, authHandler *services.AuthorizationH
 	server.Add(func(rg *gin.RouterGroup) {
 		config := common.GetEnvironment().GetConfig()
 		g := rg.Group(services.CredentialApiGroup)
+		// Holder wallet API follows microservice-core-go /v1/:tenantId prefix.
+		registerHolderRoutes(rg.Group("/api/presentation"), authHandler, config)
 		mWGroup := g.Group(services.DirectGroup)
 		mWGroup.Use(middleware.VerifyState(common.GetEnvironment()))
 		mWGroup.GET("/:id/request-object/request.jwt", func(ctx *gin.Context) {

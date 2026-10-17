@@ -31,7 +31,8 @@ type PresentationAuthorizationCreationReply struct {
 type PresentationAuthorizationRemoteRequest struct {
 	common.Request
 
-	URL string `json:"url"`
+	URL         string `json:"url"`
+	ConsentMode string `json:"consentMode"`
 
 	Ttl int    `json:"ttl,omitempty"`
 	Did string `json:"did,omitempty"`

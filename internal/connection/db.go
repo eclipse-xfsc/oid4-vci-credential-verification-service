@@ -39,7 +39,8 @@ type Query struct{ query *gocql.Query }
 func (q *Query) Consistency(c gocql.Consistency) QueryInterface {
 	return NewQuery(q.query.Consistency(c))
 }
-func (q *Query) Exec() error                    { return q.query.Exec() }
+func (q *Query) Exec() error { return q.query.Exec() }
+
 func (q *Query) Iter() IterInterface            { return q.query.Iter() }
 func (q *Query) Scan(dest ...interface{}) error { return q.query.Scan(dest...) }
 func (q *Query) WithContext(c context.Context) QueryInterface {

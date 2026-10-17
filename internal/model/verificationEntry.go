@@ -20,6 +20,7 @@ type VerificationEntry struct {
 	ResponseUri         string                         `json:"responseUri"`
 	ResponseMode        string                         `json:"responseMode"`
 	ResponseType        string                         `json:"responseType"`
+	ConsentMode         string                         `json:"consentMode"`
 	State               string                         `json:"state"`
 	AuthorizationState  string                         `json:"authorizationState,omitempty"`
 	LastUpdateTimeStamp time.Time                      `json:"lastUpdateTimeStamp"`
