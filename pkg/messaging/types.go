@@ -40,6 +40,7 @@ type PresentationAuthorizationRemoteRequest struct {
 
 type PresentationAuthorizationRemoteReply struct {
 	common.Reply
+	PresentationId string `json:"presentation_id"`
 }
 
 const (

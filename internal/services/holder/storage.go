@@ -1,4 +1,4 @@
-package services
+package holder
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,7 +40,7 @@ func resolveCredentials(ctx context.Context, cfg *model.Config, row *model.Verif
 		return nil, err
 	}
 
-	validatedBase, err := validateOutboundURL(cfg.StorageServiceURL, cfg, false)
+	validatedBase, err := shared.ValidateOutboundURL(cfg.StorageServiceURL, cfg, false)
 	if err != nil {
 		return nil, fmt.Errorf("invalid storage service URL: %w", err)
 	}
@@ -58,16 +59,16 @@ func resolveCredentials(ctx context.Context, cfg *model.Config, row *model.Verif
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := secureHTTPClient().Do(req)
+	resp, err := shared.SecureHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("credential storage request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, shared.MaxHTTPResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(raw)) > maxHTTPResponseBytes {
+	if int64(len(raw)) > shared.MaxHTTPResponseBytes {
 		return nil, errors.New("credential storage response exceeds size limit")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

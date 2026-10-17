@@ -1,10 +1,11 @@
-package services
+package holder
 
 import (
 	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
 	"strings"
@@ -15,7 +16,7 @@ import (
 
 func GetPolicyResult(input interface{}, policy string) (map[string]interface{}, error) {
 	cfg := common.GetEnvironment().GetConfig()
-	endpoint, err := validateOutboundURL(policy, cfg, false)
+	endpoint, err := shared.ValidateOutboundURL(policy, cfg, false)
 	if err != nil {
 		return nil, fmt.Errorf("invalid policy URL: %w", err)
 	}
@@ -29,16 +30,16 @@ func GetPolicyResult(input interface{}, policy string) (map[string]interface{}, 
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Accept", "application/json")
-	res, err := secureHTTPClient().Do(r)
+	res, err := shared.SecureHTTPClient().Do(r)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(res.Body, maxHTTPResponseBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(res.Body, shared.MaxHTTPResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(raw)) > maxHTTPResponseBytes {
+	if int64(len(raw)) > shared.MaxHTTPResponseBytes {
 		return nil, errors.New("policy response exceeds size limit")
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {

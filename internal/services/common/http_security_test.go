@@ -1,4 +1,4 @@
-package services
+package common
 
 import (
 	"net/http"
@@ -10,14 +10,14 @@ import (
 
 func TestExternalURLsRequireHTTPSOutsideDev(t *testing.T) {
 	prod := &model.Config{}
-	if _, err := validateOutboundURL("http://example.org/request.jwt", prod, true); err == nil {
+	if _, err := ValidateOutboundURL("http://example.org/request.jwt", prod, true); err == nil {
 		t.Fatal("HTTP must be rejected in production")
 	}
-	if _, err := validateOutboundURL("https://127.0.0.1/private", prod, true); err == nil {
+	if _, err := ValidateOutboundURL("https://127.0.0.1/private", prod, true); err == nil {
 		t.Fatal("loopback must be rejected in production")
 	}
 	dev := &model.Config{IsDev: true}
-	if _, err := validateOutboundURL("http://127.0.0.1/request.jwt", dev, true); err != nil {
+	if _, err := ValidateOutboundURL("http://127.0.0.1/request.jwt", dev, true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -33,7 +33,7 @@ func TestRedirectsAreNotFollowed(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
-	resp, err := secureHTTPClient().Get(server.URL + "/redirect")
+	resp, err := SecureHTTPClient().Get(server.URL + "/redirect")
 	if err != nil {
 		t.Fatal(err)
 	}

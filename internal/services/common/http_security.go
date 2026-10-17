@@ -1,4 +1,4 @@
-package services
+package common
 
 import (
 	"context"
@@ -13,9 +13,9 @@ import (
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 )
 
-const maxHTTPResponseBytes int64 = 2 << 20
+const MaxHTTPResponseBytes int64 = 2 << 20
 
-func secureHTTPClient() *http.Client {
+func SecureHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -24,7 +24,7 @@ func secureHTTPClient() *http.Client {
 	}
 }
 
-func validateOutboundURL(raw string, cfg *model.Config, external bool) (*url.URL, error) {
+func ValidateOutboundURL(raw string, cfg *model.Config, external bool) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, err
@@ -48,10 +48,10 @@ func validateOutboundURL(raw string, cfg *model.Config, external bool) (*url.URL
 	return u, nil
 }
 
-// externalHTTPClient rejects non-public DNS resolutions in production, including
+// ExternalHTTPClient rejects non-public DNS resolutions in production, including
 // DNS rebinding between URL validation and TCP connection establishment.
-func externalHTTPClient(cfg *model.Config) *http.Client {
-	client := secureHTTPClient()
+func ExternalHTTPClient(cfg *model.Config) *http.Client {
+	client := SecureHTTPClient()
 	if cfg.IsDev {
 		return client
 	}

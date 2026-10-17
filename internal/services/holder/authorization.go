@@ -1,10 +1,11 @@
-package services
+package holder
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"net/http"
 	"net/url"
 	"strings"
@@ -106,8 +107,8 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 // @Param request_uri query string true "Request URI"
 // @Param authUrl query string false "Auth URL"
 // @Success 302
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/presentation/authorize [get]
 func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, config *model.Config) {
 	client_id, a := c.GetQuery("client_id")
@@ -131,17 +132,17 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 			}
 			processed, err := handler.HandleRequestObject(ctx, client_id, request_uri, tenantId, groupId, requestId, config)
 			if err != nil {
-				ErrorResponse(c, "Request could not be handled", err)
+				shared.ErrorResponse(c, "Request could not be handled", err)
 				return
 			}
 			redirectURI := buildAuthorizationRedirect(authUrl, processed)
 			handler.logger.Info("Redirect to: " + redirectURI)
 			c.Redirect(http.StatusFound, redirectURI)
 		} else {
-			ErrorResponse(c, "Path Variable missing.", errors.ErrUnsupported)
+			shared.ErrorResponse(c, "Path Variable missing.", errors.ErrUnsupported)
 		}
 	} else {
-		ErrorResponse(c, "URI parameter missing.", errors.ErrUnsupported)
+		shared.ErrorResponse(c, "URI parameter missing.", errors.ErrUnsupported)
 	}
 }
 
@@ -166,9 +167,9 @@ func ResolveAuthUrl(c *gin.Context, config *model.Config) (*url.URL, error) {
 			}
 		}
 	}
-	authUrl, err = validateOutboundURL(config.ExternalPresentation.AuthorizeEndpoint, config, true)
+	authUrl, err = shared.ValidateOutboundURL(config.ExternalPresentation.AuthorizeEndpoint, config, true)
 	if err != nil {
-		return nil, ErrorResponse(c, "AuthorizeEndpoint is not parsable", err)
+		return nil, shared.ErrorResponse(c, "AuthorizeEndpoint is not parsable", err)
 	}
 	return authUrl, nil
 }
@@ -272,14 +273,14 @@ func (handler *AuthorizationHandler) receive(ev event.Event) {
 	headers.Set("X-KEY", remoteRequest.Key)
 	headers.Set("X-DID", remoteRequest.Did)
 	ctx = context.WithValue(ctx, HeaderContextKey, headers)
-	_, err = handler.HandleRequestObject(ctx, clientID, requestURI, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, handler.config)
+	processed, err := handler.HandleRequestObject(ctx, clientID, requestURI, remoteRequest.TenantId, remoteRequest.GroupId, remoteRequest.RequestId, handler.config)
 	if err != nil {
 		handler.logger.Error(err, "Error during request object handling")
 		return
 	}
 	resp := messaging.PresentationAuthorizationRemoteReply{Reply: common.Reply{
 		RequestId: remoteRequest.RequestId, TenantId: remoteRequest.TenantId,
-	}}
+	}, PresentationId: processed.State}
 	b, err := json.Marshal(resp)
 	if err != nil {
 		handler.logger.Error(err, "Error marshaling remote authorization reply")

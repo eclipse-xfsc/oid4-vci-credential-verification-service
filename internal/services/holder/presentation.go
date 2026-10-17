@@ -1,4 +1,4 @@
-package services
+package holder
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,8 +42,8 @@ const (
 // @Param id path string true "Proof ID"
 // @Param body body model.ProofModel true "Proof Model"
 // @Success 200
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/internal/proofs/proof/{id} [post]
 func HandleCreateProofById(ctx *gin.Context, config *model.Config) {
 	handleCreateProof(ctx, config, false)
@@ -58,8 +59,8 @@ func HandleCreateProofById(ctx *gin.Context, config *model.Config) {
 // @Param id path string true "Proof RequestID"
 // @Param body body model.ProofModel true "Proof Model"
 // @Success 200
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/internal/proofs/proof/request/{id} [post]
 func HandleCreateProofByRequestId(ctx *gin.Context, config *model.Config) {
 	handleCreateProof(ctx, config, true)
@@ -74,7 +75,7 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 	reqBody, err := io.ReadAll(ctx.Request.Body)
 
 	if err != nil {
-		ErrorResponse(ctx, BodyError, errors.New(BodyError))
+		shared.ErrorResponse(ctx, BodyError, errors.New(BodyError))
 		return
 	}
 
@@ -85,7 +86,7 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 	err = json.Unmarshal(reqBody, &body)
 
 	if err != nil {
-		ErrorResponse(ctx, MarshallingError, err)
+		shared.ErrorResponse(ctx, MarshallingError, err)
 		return
 	}
 
@@ -96,12 +97,12 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 		row, err = common.GetEntryFromDb(context, tenantId, id)
 	}
 	if err != nil {
-		ErrorResponse(ctx, RecordNotFoundError, err)
+		shared.ErrorResponse(ctx, RecordNotFoundError, err)
 		return
 	}
 	acquired, err := common.TryBeginFulfillment(context, row)
 	if err != nil {
-		ErrorResponse(ctx, "Cannot lock fulfillment", err)
+		shared.ErrorResponse(ctx, "Cannot lock fulfillment", err)
 		return
 	}
 	if !acquired {
@@ -116,16 +117,16 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 	}()
 	res, err := signerServiceSignPresentations(body, row, logger, config)
 	if err != nil {
-		ErrorResponse(ctx, SignError, err)
+		shared.ErrorResponse(ctx, SignError, err)
 		return
 	}
 	if err := res.ValidateAgainst(&row.DCQLQuery); err != nil {
-		ErrorResponse(ctx, "DCQL validation failed", err)
+		shared.ErrorResponse(ctx, "DCQL validation failed", err)
 		return
 	}
 	err = postResponse(context, res, row, logger)
 	if err != nil {
-		_ = ErrorResponse(ctx, PostResponseError, err)
+		_ = shared.ErrorResponse(ctx, PostResponseError, err)
 		return
 	}
 
@@ -133,7 +134,7 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 	err = common.UpdateDbStatus(context, tenantId, string(model.PresentationTransmitted), id)
 
 	if err != nil {
-		ErrorResponse(ctx, TransmitError, err)
+		shared.ErrorResponse(ctx, TransmitError, err)
 		return
 	}
 
@@ -152,17 +153,17 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 
 	row, err := common.GetEntryFromDb(ctx.Request.Context(), tenantID, id)
 	if err != nil {
-		ErrorResponse(ctx, RecordNotFoundError, err)
+		shared.ErrorResponse(ctx, RecordNotFoundError, err)
 		return
 	}
 
 	var request model.FulfillPresentationRequest
 	if err := ctx.ShouldBindJSON(&request); err != nil {
-		ErrorResponse(ctx, BodyError, err)
+		shared.ErrorResponse(ctx, BodyError, err)
 		return
 	}
 	if request.HolderDid == "" || request.SignKey == "" {
-		ErrorResponse(ctx, BodyError, errors.New("holderDid and signKey are required"))
+		shared.ErrorResponse(ctx, BodyError, errors.New("holderDid and signKey are required"))
 		return
 	}
 	if request.SignNamespace == "" {
@@ -174,7 +175,7 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 
 	acquired, err := common.TryBeginFulfillment(ctx.Request.Context(), row)
 	if err != nil {
-		ErrorResponse(ctx, "Cannot lock fulfillment", err)
+		shared.ErrorResponse(ctx, "Cannot lock fulfillment", err)
 		return
 	}
 	if !acquired {
@@ -190,12 +191,12 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 
 	groups, err := resolveCredentials(ctx.Request.Context(), config, row)
 	if err != nil {
-		ErrorResponse(ctx, "Credential selection failed", err)
+		shared.ErrorResponse(ctx, "Credential selection failed", err)
 		return
 	}
 	groups, err = applyCredentialSelectionPolicy(row.TenantId, row.GroupId, row.ClientId, row.DCQLQuery, groups, config.ExternalPresentation.CredentialSelectionPolicy)
 	if err != nil {
-		ErrorResponse(ctx, "Credential disclosure denied", err)
+		shared.ErrorResponse(ctx, "Credential disclosure denied", err)
 		return
 	}
 
@@ -208,20 +209,20 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 	}
 	vpToken, err := signerServiceSignPresentations(proof, row, logger, config)
 	if err != nil {
-		ErrorResponse(ctx, SignError, err)
+		shared.ErrorResponse(ctx, SignError, err)
 		return
 	}
 	if err := vpToken.ValidateAgainst(&row.DCQLQuery); err != nil {
-		ErrorResponse(ctx, "DCQL validation failed", err)
+		shared.ErrorResponse(ctx, "DCQL validation failed", err)
 		return
 	}
 	if err := postResponse(ctx.Request.Context(), vpToken, row, logger); err != nil {
-		ErrorResponse(ctx, PostResponseError, err)
+		shared.ErrorResponse(ctx, PostResponseError, err)
 		return
 	}
 	transmitted = true // Never retry after a successful network submission.
 	if err := common.UpdateDbStatus(ctx.Request.Context(), tenantID, string(model.PresentationTransmitted), id); err != nil {
-		ErrorResponse(ctx, TransmitError, err)
+		shared.ErrorResponse(ctx, TransmitError, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"status": model.PresentationTransmitted})
@@ -236,8 +237,8 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 // @Param tenantId path string true "Tenant ID"
 // @Param id path string true "Proof ID"
 // @Success 200 {object} model.VerificationEntry
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/internal/proofs/proof/{id} [get]
 func HandleGetProofRequestById(ctx *gin.Context, config *model.Config) {
 	handleGetProofRequest(ctx, config, false)
@@ -252,8 +253,8 @@ func HandleGetProofRequestById(ctx *gin.Context, config *model.Config) {
 // @Param tenantId path string true "Tenant ID"
 // @Param id path string true "Proof RequestID"
 // @Success 200 {object} model.VerificationEntry
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/internal/proofs/proof/request/{id} [get]
 func HandleGetProofRequestByRequestId(ctx *gin.Context, config *model.Config) {
 	handleGetProofRequest(ctx, config, true)
@@ -273,7 +274,7 @@ func handleGetProofRequest(ctx *gin.Context, config *model.Config, byRequestId b
 		ctx.JSON(200, row)
 		return
 	} else {
-		ErrorResponse(ctx, RecordNotFoundError, errors.New(RecordNotFoundError))
+		shared.ErrorResponse(ctx, RecordNotFoundError, errors.New(RecordNotFoundError))
 	}
 }
 
@@ -287,8 +288,8 @@ func handleGetProofRequest(ctx *gin.Context, config *model.Config, byRequestId b
 // @Param id path string true "Proof ID"
 // @Param groupId path string true "Group ID"
 // @Success 200
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/internal/proofs/proof/{id}/assign/{groupId} [put]
 func HandleAssignProof(ctx *gin.Context, config *model.Config) {
 	id := ctx.Param("id")
@@ -300,7 +301,7 @@ func HandleAssignProof(ctx *gin.Context, config *model.Config) {
 		ctx.AbortWithStatus(200)
 		return
 	} else {
-		ErrorResponse(ctx, AssignError, errors.New(AssignError))
+		shared.ErrorResponse(ctx, AssignError, errors.New(AssignError))
 	}
 }
 
@@ -313,8 +314,8 @@ func HandleAssignProof(ctx *gin.Context, config *model.Config) {
 // @Param tenantId path string true "Tenant ID"
 // @Param groupId path string true "Group ID"
 // @Success 200 {array} model.VerificationEntry
-// @Failure 400 {object} ServerErrorResponse
-// @Failure 500 {object} ServerErrorResponse
+// @Failure 400 {object} shared.ServerErrorResponse
+// @Failure 500 {object} shared.ServerErrorResponse
 // @Router /v1/tenants/{tenantId}/internal/list/proofs/{groupId} [get]
 func HandleListProof(ctx *gin.Context, config *model.Config) {
 	groupId := ctx.Param("groupId")
@@ -326,7 +327,7 @@ func HandleListProof(ctx *gin.Context, config *model.Config) {
 		ctx.JSON(200, row)
 		return
 	} else {
-		ErrorResponse(ctx, RecordNotFoundError, errors.New(RecordNotFoundError))
+		shared.ErrorResponse(ctx, RecordNotFoundError, errors.New(RecordNotFoundError))
 	}
 }
 
@@ -357,7 +358,7 @@ func postResponse(ctx context.Context, vpToken presentation.VPToken, row *model.
 		return fmt.Errorf("unsupported response_mode %q", row.ResponseMode)
 	}
 
-	endpoint, err := validateOutboundURL(row.ResponseUri, commonTypes.GetEnvironment().GetConfig(), true)
+	endpoint, err := shared.ValidateOutboundURL(row.ResponseUri, commonTypes.GetEnvironment().GetConfig(), true)
 	if err != nil {
 		return fmt.Errorf("invalid response_uri: %w", err)
 	}
@@ -366,7 +367,7 @@ func postResponse(ctx context.Context, vpToken presentation.VPToken, row *model.
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rep, err := externalHTTPClient(commonTypes.GetEnvironment().GetConfig()).Do(req)
+	rep, err := shared.ExternalHTTPClient(commonTypes.GetEnvironment().GetConfig()).Do(req)
 	if err != nil {
 		logger.Error(err, "Error during posting response", "responseUri", row.ResponseUri)
 		return err
@@ -489,7 +490,7 @@ func processPresentationData(presentationRequest map[string]interface{}, logger 
 	if err != nil {
 		return nil, err
 	}
-	endpoint, err := validateOutboundURL(config.SignerService.PresentationSignUrl, config, false)
+	endpoint, err := shared.ValidateOutboundURL(config.SignerService.PresentationSignUrl, config, false)
 	if err != nil {
 		return nil, fmt.Errorf("invalid signer URL: %w", err)
 	}
@@ -499,16 +500,16 @@ func processPresentationData(presentationRequest map[string]interface{}, logger 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-	rep, err := secureHTTPClient().Do(req)
+	rep, err := shared.SecureHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("signer service call failed: %w", err)
 	}
 	defer rep.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(rep.Body, maxHTTPResponseBytes+1))
+	respBody, err := io.ReadAll(io.LimitReader(rep.Body, shared.MaxHTTPResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(respBody)) > maxHTTPResponseBytes {
+	if int64(len(respBody)) > shared.MaxHTTPResponseBytes {
 		return nil, errors.New("signer response exceeds size limit")
 	}
 	if rep.StatusCode < 200 || rep.StatusCode >= 300 {

@@ -1,10 +1,11 @@
-package services
+package holder
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"mime"
 	"net/http"
@@ -50,7 +51,7 @@ func parsePercentEncodedUrl(request_uri string, setHttpSchema bool) (*url.URL, e
 	if setHttpSchema && requestUrl.Scheme == "" {
 		requestUrl.Scheme = common.GetEnvironment().GetConfig().ExternalPresentation.ClientUrlSchema
 	}
-	validated, err := validateOutboundURL(requestUrl.String(), common.GetEnvironment().GetConfig(), true)
+	validated, err := shared.ValidateOutboundURL(requestUrl.String(), common.GetEnvironment().GetConfig(), true)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +63,7 @@ func sendRequestWithRedirects(
 	ctx context.Context,
 	outerClientID string,
 ) (*presentation.RequestObject, error) {
-	client := externalHTTPClient(common.GetEnvironment().GetConfig())
+	client := shared.ExternalHTTPClient(common.GetEnvironment().GetConfig())
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), nil)
 	if err != nil {
@@ -101,7 +102,7 @@ func sendRequestWithRedirects(
 	return handleSuccessfulResponse(resp, outerClientID)
 }
 
-func GetHttpClient() *http.Client { return secureHTTPClient() }
+func GetHttpClient() *http.Client { return shared.SecureHTTPClient() }
 
 func handleSuccessfulResponse(resp *http.Response, outerClientID string) (*presentation.RequestObject, error) {
 	var object = presentation.RequestObject{}
@@ -111,11 +112,11 @@ func handleSuccessfulResponse(resp *http.Response, outerClientID string) (*prese
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPResponseBytes+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, shared.MaxHTTPResponseBytes+1))
 	if err != nil {
 		return nil, errors.Join(errors.New("could not parse response body"), err)
 	}
-	if int64(len(body)) > maxHTTPResponseBytes {
+	if int64(len(body)) > shared.MaxHTTPResponseBytes {
 		return nil, errors.New("request object exceeds size limit")
 	}
 

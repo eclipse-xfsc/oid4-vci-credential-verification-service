@@ -1,4 +1,4 @@
-package services
+package verifier
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
 
@@ -24,7 +25,7 @@ import (
 // object keyed by DCQL credential-query ID; presentation_submission is not used.
 func HandleProof(c *gin.Context, requestor *PresentationRequestor, config *model.Config) {
 	if c.ContentType() != "application/x-www-form-urlencoded" {
-		ErrorResponse(c, "Wrong content Type", errors.New("unsupported media type"))
+		shared.ErrorResponse(c, "Wrong content Type", errors.New("unsupported media type"))
 		return
 	}
 
@@ -32,34 +33,34 @@ func HandleProof(c *gin.Context, requestor *PresentationRequestor, config *model
 	tenantID := c.Param("tenantId")
 	row, err := commonServices.GetEntryFromDb(c.Request.Context(), tenantID, id)
 	if err != nil {
-		ErrorResponse(c, "Verification transaction not found", err)
+		shared.ErrorResponse(c, "Verification transaction not found", err)
 		return
 	}
 
 	state := c.PostForm("state")
 	if state == "" || state != id {
-		ErrorResponse(c, "Invalid state", errors.New("OID4VP response state does not match the verification transaction"))
+		shared.ErrorResponse(c, "Invalid state", errors.New("OID4VP response state does not match the verification transaction"))
 		return
 	}
 
 	raw := c.PostForm("vp_token")
 	if raw == "" {
-		ErrorResponse(c, "Form data missing", errors.New("vp_token is required"))
+		shared.ErrorResponse(c, "Form data missing", errors.New("vp_token is required"))
 		return
 	}
 
 	var vpToken presentation.VPToken
 	if err := json.Unmarshal([]byte(raw), &vpToken); err != nil {
-		ErrorResponse(c, "VP token cannot be parsed", err)
+		shared.ErrorResponse(c, "VP token cannot be parsed", err)
 		return
 	}
 	if err := vpToken.ValidateAgainst(&row.DCQLQuery); err != nil {
-		ErrorResponse(c, "VP token does not satisfy DCQL query", err)
+		shared.ErrorResponse(c, "VP token does not satisfy DCQL query", err)
 		return
 	}
 
 	if err := requestor.CheckPresentations(c.Request.Context(), id, tenantID, vpToken); err != nil {
-		ErrorResponse(c, "error during receiving", err)
+		shared.ErrorResponse(c, "error during receiving", err)
 		return
 	}
 	c.JSON(http.StatusOK, nil)
