@@ -3,6 +3,7 @@ module github.com/eclipse-xfsc/oid4-vci-credential-verification-service
 go 1.25.0
 
 require (
+	github.com/bytedance/gopkg v0.1.4
 	github.com/cloudevents/sdk-go/v2 v2.16.0
 	github.com/eclipse-xfsc/cloud-event-provider v0.1.5
 	github.com/eclipse-xfsc/credential-storage-service v1.3.0

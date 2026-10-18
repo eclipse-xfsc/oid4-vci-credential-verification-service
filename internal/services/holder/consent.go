@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	commonTypes "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
@@ -37,11 +38,11 @@ func FulfillSelected(ctx context.Context, cfg *model.Config, row *model.Verifica
 	if err != nil {
 		return err
 	}
-	groups, err = FilterSelectedCredentials(groups, selection)
+	selectedResult, err := FilterSelectedCredentials(groups, selection)
 	if err != nil {
 		return err
 	}
-	proof := model.ProofModel{Payload: groups, SignNamespace: sign.SignNamespace, SignGroup: sign.SignGroup, SignKey: sign.SignKey, HolderDid: sign.HolderDid}
+	proof := ProofModel{Payload: selectedResult, SignNamespace: sign.SignNamespace, SignGroup: sign.SignGroup, SignKey: sign.SignKey, HolderDid: sign.HolderDid}
 	logger := commonTypes.GetEnvironment().GetLogger()
 	token, err := signerServiceSignPresentations(proof, row, logger, cfg)
 	if err != nil {

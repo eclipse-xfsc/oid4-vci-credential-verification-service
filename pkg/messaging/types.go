@@ -34,9 +34,11 @@ type PresentationAuthorizationRemoteRequest struct {
 	URL         string `json:"url"`
 	ConsentMode string `json:"consentMode"`
 
-	Ttl int    `json:"ttl,omitempty"`
-	Did string `json:"did,omitempty"`
-	Key string `json:"key,omitempty"`
+	Ttl       int    `json:"ttl,omitempty"`
+	Did       string `json:"did,omitempty"`
+	Key       string `json:"key,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Group     string `json:"group,omitempty"`
 }
 
 type PresentationAuthorizationRemoteReply struct {

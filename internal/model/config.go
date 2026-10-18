@@ -34,7 +34,7 @@ type Config struct {
 		ClientIdPolicy            string `mapstructure:"clientIdPolicy"  envconfig:"CLIENTIDPOLICY"`
 		ClientUrlSchema           string `mapstructure:"clientUrlSchema" envconfig:"CLIENTURLSCHEMA" default:"https"`
 		CredentialSelectionPolicy string `mapstructure:"credentialSelectionPolicy" envconfig:"CREDENTIALSELECTIONPOLICY"`
-	} `mapstructure:"externalpresentation"`
+	} `mapstructure:"externalpresentation" envconfig:"EXTERNALPRESENTATION"`
 	SignerService struct {
 		PresentationVerifyUrl  string `mapstructure:"presentationVerifyUrl" envconfig:"PRESENTATIONVERIFYURL"`
 		PresentationSignUrl    string `mapstructure:"presentationSignUrl" envconfig:"PRESENTATIONSIGNURL"`

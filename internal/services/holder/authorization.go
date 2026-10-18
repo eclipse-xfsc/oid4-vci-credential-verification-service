@@ -33,6 +33,17 @@ type ProcessedAuthorizationRequest struct {
 	Nonce string
 }
 
+func logRequestObject(logger logr.Logger, object interface{}) {
+
+	data, err := json.MarshalIndent(object, "", "  ")
+	if err != nil {
+		logger.Error(err, "Failed to marshal OID4VP request object")
+		return
+	}
+	logger.Info("OID4VP Request Object", "request", string(data))
+
+}
+
 func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, consentMode string, ttl int, config *model.Config) (*ProcessedAuthorizationRequest, error) {
 	if consentMode != model.ConsentManual && consentMode != model.ConsentAuto {
 		return nil, errors.New("consentMode must be manual or auto")
@@ -57,6 +68,7 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	if err != nil {
 		return nil, err
 	}
+	logRequestObject(handler.logger, object)
 	if err := object.AuthorizationRequest.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid OID4VP request object: %w", err)
 	}
@@ -277,8 +289,8 @@ func (handler *AuthorizationHandler) receive(msg *nats.Msg) {
 		return
 	}
 	headers := http.Header{}
-	headers.Set("X-NAMESPACE", remoteRequest.TenantId)
-	headers.Set("X-GROUP", remoteRequest.GroupId)
+	headers.Set("X-NAMESPACE", remoteRequest.Namespace)
+	headers.Set("X-GROUP", remoteRequest.Group)
 	headers.Set("X-KEY", remoteRequest.Key)
 	headers.Set("X-DID", remoteRequest.Did)
 	ctx = context.WithValue(ctx, HeaderContextKey, headers)
@@ -287,6 +299,7 @@ func (handler *AuthorizationHandler) receive(msg *nats.Msg) {
 		result.Error = fmt.Sprintf("authorization request failed: %v", err)
 		return
 	}
+
 	result.PresentationID = processed.State
 	if remoteRequest.ConsentMode == model.ConsentManual {
 		result.Status = "pending"
@@ -297,7 +310,11 @@ func (handler *AuthorizationHandler) receive(msg *nats.Msg) {
 		result.Error = fmt.Sprintf("cannot reload presentation request: %v", err)
 		return
 	}
-	sign := model.FulfillPresentationRequest{HolderDid: remoteRequest.Did, SignKey: remoteRequest.Key, SignNamespace: remoteRequest.TenantId, SignGroup: remoteRequest.GroupId}
+	sign := model.FulfillPresentationRequest{HolderDid: remoteRequest.Did,
+		SignKey:       remoteRequest.Key,
+		SignNamespace: remoteRequest.Namespace,
+		SignGroup:     remoteRequest.Group}
+
 	if err := AutoConsent(ctx, handler.config, row, sign); err != nil {
 		result.Error = fmt.Sprintf("auto consent failed: %v", err)
 		handler.logger.Error(err, "Auto consent processing failed", "requestId", remoteRequest.RequestId)

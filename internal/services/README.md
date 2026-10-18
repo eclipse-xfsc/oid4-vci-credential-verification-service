@@ -5,3 +5,4 @@
 - `common/*.go` und `common/`: gemeinsamer HTTP-Schutz, Fehlerbehandlung, Datenbank und State.
 
 **Technische Einschränkung:** Die Rolle ist nach Dateinamen und Dokumentation getrennt, nicht in zwei eigenständige Go-Packages. Ein physischer Move in Unterverzeichnisse ohne API-Entkopplung würde aufgrund gemeinsamer unexportierter Funktionen, Methoden auf `PresentationRequestor` und HTTP-Handler-Referenzen zu Buildfehlern führen.
+

@@ -865,6 +865,106 @@ Requests with `consentMode=auto` are evaluated without human interaction:
 
 The **Policy Client decides consent**. The Holder Service does not implement a separate policy engine.
 
+Flow: 
+```mermaid
+sequenceDiagram
+    autonumber
+
+    participant H as Holder / AutoConsent
+    participant C as Credential Resolver
+    participant P as Credential Selection Policy
+    participant DB as Cassandra
+    participant F as Fulfillment Service
+
+    H->>H: Check consentMode == auto
+    H->>H: Check CredentialSelectionPolicy configured
+
+    H->>C: resolveCredentials(ctx, cfg, row)
+    C-->>H: Credential groups with queryId and credentialId
+
+    H->>H: Build CredentialSelection[]
+
+    Note over H,P: Policy Input
+
+    H->>P: POST CredentialSelectionPolicy
+    Note right of H: {<br/>tenantId,<br/>groupId,<br/>clientId,<br/>dcqlQuery,<br/>credentials: [<br/>  {queryId, credentialId}<br/>]<br/>}
+
+    P->>P: Evaluate credential selection rules
+
+    alt Policy denies
+        P-->>H: {"approved": false}
+        H->>DB: TransitionPresentation(pending → rejected)
+        DB-->>H: changed / error
+        H-->>H: Return nil if transition succeeded
+
+    else Policy approves
+        P-->>H: {"approved": true, "selections": [...]}
+
+        H->>H: Decode PresentationSelection
+
+        alt No selections returned
+            H-->>H: Error: policy approved without a selection
+        else Valid selections
+            H->>F: FulfillSelected(ctx, cfg, row, sign, selection)
+            F-->>H: nil / error
+        end
+
+    else Invalid policy response
+        P-->>H: Missing or invalid approved
+        H-->>H: Error: policy response missing approved boolean
+    end
+```
+
+Policy Input: 
+
+```json
+{
+  "tenantId": "demo-tenant",
+  "groupId": "demo-group",
+  "clientId": "https://verifier.example.org",
+  "dcqlQuery": {
+    "credentials": [
+      {
+        "id": "identity",
+        "format": "dc+sd-jwt"
+      }
+    ]
+  },
+  "credentials": [
+    {
+      "queryId": "identity",
+      "credentialId": "credential-123"
+    },
+    {
+      "queryId": "identity",
+      "credentialId": "credential-456"
+    }
+  ]
+}
+```
+
+Policy Output with Approve: 
+```json
+{
+  "approved": true,
+  "selections": [
+    {
+      "queryId": "identity",
+      "credentialId": "credential-123"
+    }
+  ]
+}
+```
+
+Policy Output without Approve:
+
+```json
+{
+  "approved": false
+}
+```
+
+
 ## 5. PresentationSelection
 
 Both consent modes produce the same structure:

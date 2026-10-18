@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 
 	logr "github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
 
@@ -40,7 +41,7 @@ const (
 // @Produce json
 // @Param tenantId path string true "Tenant ID"
 // @Param id path string true "Proof ID"
-// @Param body body model.ProofModel true "Proof Model"
+// @Param body body ProofModel true "Proof Model"
 // @Success 200
 // @Failure 400 {object} shared.ServerErrorResponse
 // @Failure 500 {object} shared.ServerErrorResponse
@@ -57,7 +58,7 @@ func HandleCreateProofById(ctx *gin.Context, config *model.Config) {
 // @Produce json
 // @Param tenantId path string true "Tenant ID"
 // @Param id path string true "Proof RequestID"
-// @Param body body model.ProofModel true "Proof Model"
+// @Param body body ProofModel true "Proof Model"
 // @Success 200
 // @Failure 400 {object} shared.ServerErrorResponse
 // @Failure 500 {object} shared.ServerErrorResponse
@@ -81,7 +82,7 @@ func handleCreateProof(ctx *gin.Context, config *model.Config, byRequestId bool)
 
 	ctx.Request.Body.Close()
 
-	var body model.ProofModel
+	var body ProofModel
 
 	err = json.Unmarshal(reqBody, &body)
 
@@ -208,8 +209,8 @@ func HandleFulfillProofById(ctx *gin.Context, config *model.Config) {
 		return
 	}
 
-	proof := model.ProofModel{
-		Payload:       groups,
+	proof := ProofModel{
+		Payload:       &SelectedCredentialResult{Groups: groups},
 		SignNamespace: request.SignNamespace,
 		SignKey:       request.SignKey,
 		SignGroup:     request.SignGroup,
@@ -407,10 +408,26 @@ func getFormData(vpToken presentation.VPToken, row *model.VerificationEntry) (ur
 	return formdata, nil
 }
 
-func signerServiceSignPresentations(payload model.ProofModel, row *model.VerificationEntry, logger logr.Logger, config *model.Config) (presentation.VPToken, error) {
-	result := make(presentation.VPToken, len(payload.Payload))
+func signerServiceSignPresentations(payload ProofModel, row *model.VerificationEntry, logger logr.Logger, config *model.Config) (presentation.VPToken, error) {
+	if payload.Payload == nil {
+		return nil, errors.New("missing presentation payload")
+	}
+	disclosureByQuery := make(map[string]map[string][]string)
+	for _, d := range payload.Payload.Disclosures {
+		if d.QueryId == "" || d.CredentialID == "" {
+			return nil, errors.New("disclosure selection requires queryId and credentialId")
+		}
+		if disclosureByQuery[d.QueryId] == nil {
+			disclosureByQuery[d.QueryId] = make(map[string][]string)
+		}
+		if _, exists := disclosureByQuery[d.QueryId][d.CredentialID]; exists {
+			return nil, fmt.Errorf("duplicate disclosure selection for %s/%s", d.QueryId, d.CredentialID)
+		}
+		disclosureByQuery[d.QueryId][d.CredentialID] = d.Disclosures
+	}
+	result := make(presentation.VPToken, len(payload.Payload.Groups))
 
-	for _, group := range payload.Payload {
+	for _, group := range payload.Payload.Groups {
 		queryID := group.Id
 		if queryID == "" {
 			return nil, errors.New("DCQL query id is required")
@@ -429,6 +446,10 @@ func signerServiceSignPresentations(payload model.ProofModel, row *model.Verific
 					return nil, fmt.Errorf("DCQL query %s credential %s contains a non-string SD-JWT credential (%T)", queryID, credentialID, credential.Data)
 				}
 
+				selected, ok := disclosureByQuery[queryID][credentialID]
+				if !ok {
+					return nil, fmt.Errorf("missing disclosure selection for SD-JWT credential %s/%s", queryID, credentialID)
+				}
 				request := map[string]interface{}{
 					"group":           payload.SignGroup,
 					"issuer":          payload.HolderDid,
@@ -438,13 +459,15 @@ func signerServiceSignPresentations(payload model.ProofModel, row *model.Verific
 					"format":          string(types.SDJWT),
 					"aud":             row.ClientId,
 					"nonce":           row.Nonce,
-					"disclosureFrame": []string{},
+					"disclosureFrame": selected,
 				}
 
 				signed, err := processPresentationData(request, logger, config)
+
 				if err != nil {
 					return nil, err
 				}
+				logger.Info("Signed Token:", "vp_token", string(signed))
 
 				// A dc+sd-jwt presentation is a compact string. VPToken stores JSON
 				// values as RawMessage, therefore it must be JSON-encoded first.
@@ -479,6 +502,7 @@ func signerServiceSignPresentations(payload model.ProofModel, row *model.Verific
 			if err != nil {
 				return nil, err
 			}
+			logger.Info("Signed Token:", "vp_token", string(signed))
 			raw := json.RawMessage(bytes.TrimSpace(signed))
 			if !json.Valid(raw) {
 				return nil, fmt.Errorf("signer returned invalid JSON for LDP VC DCQL query %s", queryID)
@@ -493,42 +517,76 @@ func signerServiceSignPresentations(payload model.ProofModel, row *model.Verific
 	return result, nil
 }
 
-func processPresentationData(presentationRequest map[string]interface{}, logger logr.Logger, config *model.Config) ([]byte, error) {
+func processPresentationData(
+	presentationRequest map[string]interface{},
+	logger logr.Logger,
+	config *model.Config,
+) ([]byte, error) {
 	p, err := json.Marshal(presentationRequest)
 	if err != nil {
 		return nil, err
 	}
-	endpoint, err := shared.ValidateOutboundURL(config.SignerService.PresentationSignUrl, config, false)
+
+	endpoint, err := shared.ValidateOutboundURL(
+		config.SignerService.PresentationSignUrl,
+		config,
+		false,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("invalid signer URL: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, endpoint.String(), bytes.NewReader(p))
+
+	req, err := http.NewRequest(
+		http.MethodPost,
+		endpoint.String(),
+		bytes.NewReader(p),
+	)
 	if err != nil {
 		return nil, err
 	}
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+
 	rep, err := shared.SecureHTTPClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("signer service call failed: %w", err)
 	}
 	defer rep.Body.Close()
-	respBody, err := io.ReadAll(io.LimitReader(rep.Body, shared.MaxHTTPResponseBytes+1))
+
+	respBody, err := io.ReadAll(
+		io.LimitReader(rep.Body, shared.MaxHTTPResponseBytes+1),
+	)
 	if err != nil {
 		return nil, err
 	}
+
 	if int64(len(respBody)) > shared.MaxHTTPResponseBytes {
 		return nil, errors.New("signer response exceeds size limit")
 	}
+
 	if rep.StatusCode < 200 || rep.StatusCode >= 300 {
-		return nil, fmt.Errorf("signer service returned HTTP %d: %s", rep.StatusCode, strings.TrimSpace(string(respBody)))
+		return nil, fmt.Errorf(
+			"signer service returned HTTP %d: %s",
+			rep.StatusCode,
+			strings.TrimSpace(string(respBody)),
+		)
 	}
-	return respBody, nil
+
+	var encoded string
+	if err := json.Unmarshal(respBody, &encoded); err != nil {
+		return nil, fmt.Errorf("invalid signer response: %w", err)
+	}
+
+	return []byte(strings.Trim(encoded, "\"")), nil
 }
 
-func fromProofModelToPresentation(payload model.ProofModel, logger logr.Logger) ([]map[string]interface{}, error) {
+func fromProofModelToPresentation(payload ProofModel, logger logr.Logger) ([]map[string]interface{}, error) {
+	if payload.Payload == nil {
+		return nil, errors.New("missing presentation payload")
+	}
 	var res = make([]map[string]interface{}, 0)
-	for _, pres := range payload.Payload {
+	for _, pres := range payload.Payload.Groups {
 		var verPres map[string]interface{}
 		filledTemplate := fmt.Sprintf(payloadtemplate, pres.Id, payload.HolderDid)
 		err := json.Unmarshal([]byte(filledTemplate), &verPres)

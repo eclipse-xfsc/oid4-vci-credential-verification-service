@@ -8,7 +8,7 @@ set -euo pipefail
 
 INFRA_NAMESPACE="${K8S_INFRA_NAMESPACE:-infrastructure}"
 APPLICATION_NAMESPACE="${K8S_APPLICATION_NAMESPACE:-ocm-wstack}"
-
+SECURITY_NAMESPACE="${K8S_SECURITY_NAMESPACE:-security}"
 # ============================================================
 # Port forwards
 #
@@ -27,6 +27,7 @@ FORWARDS=(
   # Application
   "${APPLICATION_NAMESPACE}:storage-service:9080:8080"
   "${APPLICATION_NAMESPACE}:signer:8081:8080"
+  "${SECURITY_NAMESPACE}:openbao:8200:8200"
 )
 
 PID_DIR="${TMPDIR:-/tmp}/xfsc-verification-port-forwards"

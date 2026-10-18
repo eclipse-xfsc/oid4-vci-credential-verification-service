@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 )
@@ -26,7 +27,7 @@ func AutoConsent(ctx context.Context, cfg *model.Config, row *model.Verification
 	ids := []CredentialSelection{}
 	for _, g := range groups {
 		for id := range g.Credentials {
-			ids = append(ids, CredentialSelection{QueryID: g.Id, CredentialID: id})
+			ids = append(ids, CredentialSelection{QueryId: g.Id, CredentialID: id})
 		}
 	}
 	result, err := GetPolicyResult(map[string]interface{}{"tenantId": row.TenantId, "groupId": row.GroupId, "clientId": row.ClientId, "dcqlQuery": row.DCQLQuery, "credentials": ids}, cfg.ExternalPresentation.CredentialSelectionPolicy)

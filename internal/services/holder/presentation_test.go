@@ -9,7 +9,6 @@ import (
 
 	"github.com/eclipse-xfsc/microservice-core-go/pkg/logr"
 
-	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"github.com/stretchr/testify/require"
 )
@@ -22,8 +21,8 @@ func TestFromProofModelToPresentation(t *testing.T) {
 	var payload []presentation.FilterResult
 	err = json.Unmarshal(bdata, &payload)
 	require.Nil(t, err)
-	proof := model.ProofModel{
-		Payload:       payload,
+	proof := ProofModel{
+		Payload:       &SelectedCredentialResult{Groups: payload},
 		SignNamespace: "test",
 		SignKey:       "test",
 		SignGroup:     "test",
