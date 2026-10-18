@@ -34,7 +34,6 @@ func HandleCreateProofById(c *gin.Context, cfg *model.Config) { holder.HandleCre
 func HandleCreateProofByRequestId(c *gin.Context, cfg *model.Config) {
 	holder.HandleCreateProofByRequestId(c, cfg)
 }
-func HandleFulfillProofById(c *gin.Context, cfg *model.Config) { holder.HandleFulfillProofById(c, cfg) }
 func HandleGetProofRequestById(c *gin.Context, cfg *model.Config) {
 	holder.HandleGetProofRequestById(c, cfg)
 }

@@ -332,52 +332,11 @@ The actual credential disclosure is a separate fulfillment step. This prevents r
 
 ## Scenario 5 — Fulfill an external request from Credential Storage
 
-After the local application/user has authorized disclosure, call:
-
-```http
-POST /v1/tenants/{tenantId}/internal/proofs/proof/{state}/fulfill
-Content-Type: application/json
-```
-
-Example body:
-
-```json
-{
-  "holderDid": "did:web:holder.example",
-  "signKey": "presentation-key",
-  "signNamespace": "tenant-1",
-  "signGroup": "account-123"
-}
-```
-
-Only signing material is accepted. **Credentials are not accepted from the caller.** The service resolves them itself using the stored DCQL snapshot.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant UI as Authorized local application
-    participant CVS as Verification Service
-    participant DB as Cassandra
-    participant Storage as Credential Storage v1.3.0
-    participant Signer as Crypto Provider v2.3.x
-    participant Verifier as External verifier
-
-    UI->>CVS: POST /internal/proofs/proof/{state}/fulfill
-    CVS->>DB: load transaction by tenant + protected state
-    DB-->>CVS: DCQL snapshot + response_uri + nonce
-    CVS->>Storage: POST /v1/tenants/{tenant}/storage/{region}/{country}/{groupId}/credentials<br/>body = DCQL snapshot
-    Storage->>Storage: load + decrypt account credentials
-    Storage->>Storage: DCQLQuery.Filter(credentials)
-    Storage-->>CVS: Groups []FilterResult
-    CVS->>CVS: build VP(s) keyed by DCQL query id
-    CVS->>Signer: POST /v1/presentation/proof
-    Signer-->>CVS: signed presentation(s)
-    CVS->>CVS: VPToken.ValidateAgainst(stored DCQL)
-    CVS->>Verifier: POST response_uri<br/>vp_token + state
-    Verifier-->>CVS: HTTP 2xx
-    CVS->>DB: status = presentation-transmitted
-    CVS-->>UI: success
-```
+**The old `POST /internal/proofs/proof/{state}/fulfill` endpoint was removed.**
+It bypassed the consent selection contract and could not carry SD-JWT disclosures.
+For manual approval use the Holder API `POST /api/presentation/presentations/{presentationId}/approve`.
+For machine approval send the NATS `verifier.presentation.authorization.remote` request with `consentMode=auto`.
+Both use `FulfillSelected`, DCQL validation, the same signer and the same `direct_post`/`direct_post.jwt` submission code.
 
 ### Storage contract
 
@@ -406,7 +365,7 @@ In the current Verification Service deployment `groupId` is used as the Storage 
 
 ## Manual/legacy proof endpoint
 
-The existing endpoint that accepts `ProofModel.Payload` is retained for compatibility:
+The low-level internal `ProofModel.Payload` endpoint is retained only for legacy non-consent workflows. It is **not** a manual or machine consent API; use the Holder approval endpoint below.
 
 ```text
 POST /v1/tenants/{tenantId}/internal/proofs/proof/{state}
@@ -1053,3 +1012,177 @@ The complete context is persisted at intake and reused for fulfillment. `groupId
 **Immutable context:** Consent mode and holder context are fixed at request creation.
 
 **Shared fulfillment:** Both approved flows use the same DCQL validation, credential loading, proof generation, and OID4VP response pipeline.
+
+
+---
+
+# End-to-end OID4VP operator guide (manual and machine consent)
+
+This section documents the **actual routes and JSON fields in this revision**. All examples assume a trusted gateway has authenticated the caller and supplied the required holder context. Replace the example hosts, tenant, account and key identifiers.
+
+## A. Verifier: create a VP authorization and obtain a wallet link
+
+### A1. NATS verifier request/reply (recommended for service-to-service integrations)
+
+Configure the verifier's `presentationRequest` NATS subject. Publish a CloudEvent with type `verifier.presentation.authorization` and the following `data` object (the transport uses the configured subject, not necessarily the event type as the subject):
+
+```json
+{
+  "specversion": "1.0",
+  "id": "request-event-1",
+  "source": "vp-integration",
+  "type": "verifier.presentation.authorization",
+  "datacontenttype": "application/json",
+  "data": {
+    "tenantId": "demo-tenant",
+    "groupId": "demo-account",
+    "requestId": "vp-demo-001",
+    "dcql_query": {
+      "credentials": [{
+        "id": "identity",
+        "format": "dc+sd-jwt",
+        "meta": {"vct_values": ["https://issuer.example/types/identity"]},
+        "claims": [{"path": ["test"]}]
+      }]
+    },
+    "client_id": "decentralized_identifier:did:web:verifier.example",
+    "ttl": 3600,
+    "tenant_uri": "verifier.example",
+    "target_uri": "wallet.example",
+    "requestobject_uri": "verifier.example"
+  }
+}
+```
+
+Use a NATS **request/reply** client. The reply event data contains `presentation_id` (opaque state) and `request_uri` (complete authorization URL). Forward the **complete** `request_uri` string to the wallet/holder; do not construct it from the opaque state yourself. The verifier serves the signed Request Object at `/presentation/proof/{state}/request-object/request.jwt`, and receives `direct_post` at `/presentation/proof/{state}` (with the gateway's configured version/tenant prefix).
+
+**Important:** `client_id` must resolve to the verifier's actual DID signing identity; `target_uri` is the wallet host and `requestobject_uri` the externally reachable verifier host. The Request Object endpoint in this version advertises `response_mode=direct_post` (not `direct_post.jwt`). For `ldp_vc`, replace the DCQL format and credential constraints with an LDP VC query supported by the deployed DCQL library.
+
+### A2. HTTP verifier request creation (alternative)
+
+The existing `GET /presentation/request` endpoint accepts the DCQL query as **base64url without padding** in `dcqlQuery`, plus `requestId` query parameter and `x-tenantId`, `x-groupId`, `x-client-id` (or `x-did`) and optional `x-ttl` headers. It creates the verifier transaction and returns a signed Request Object. The NATS method above is preferable when you need the complete authorization URL and presentation ID in one response.
+
+## B. Manual holder: resolve a received VP link and approve it
+
+**Step 1 — Submit the complete OID4VP link** returned by the verifier or received via QR code. The holder fetches `request_uri`, validates the Request Object, stores the DCQL snapshot, and creates a pending manual transaction:
+
+```bash
+BASE="https://holder.example/v1/tenants/demo-tenant/api/presentation"
+AUTH_URL='openid4vp://authorize?client_id=decentralized_identifier%3Adid%3Aweb%3Averifier.example&request_uri=https%3A%2F%2Fverifier.example%2Fpresentation%2Fproof%2FSTATE%2Frequest-object%2Frequest.jwt'
+
+curl -fsS -X POST "$BASE/presentations" \
+  -H 'Content-Type: application/json' \
+  -H 'x-tenantid: demo-tenant' \
+  -H 'x-groupid: demo-account' \
+  -H 'x-namespace: crypto-namespace' \
+  -H 'x-group: crypto-group' \
+  --data "$(jq -n --arg url "$AUTH_URL" '{url:$url,consentMode:"manual",ttl:3600}')"
+```
+
+Response: `201 {"presentationId":"<opaque-state>","status":"pending"}`. Keep this `presentationId` unchanged.
+
+**Step 2 — List pending requests** (same headers):
+
+```bash
+curl -fsS "$BASE/presentations" \
+  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
+  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group'
+```
+
+**Step 3 — Inspect one request and matching credentials**:
+
+```bash
+PID='<presentationId-from-step-1>'
+curl -fsS "$BASE/presentations/$PID" \
+  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
+  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group'
+curl -fsS "$BASE/presentations/$PID/candidates" \
+  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
+  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group'
+```
+
+The candidates response contains `dcqlQuery` and `candidates`. Select **actual** `queryId` and `credentialId` values from that response; do not invent credential IDs.
+
+**Step 4 — Approve and transmit**:
+
+```bash
+curl -fsS -X POST "$BASE/presentations/$PID/approve" \
+  -H 'Content-Type: application/json' \
+  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
+  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group' \
+  -d '{
+    "holderDid":"did:web:holder.example",
+    "signKey":"holder-key",
+    "selections":[{
+      "queryId":"identity",
+      "credentialId":"ACTUAL_CREDENTIAL_ID_FROM_CANDIDATES",
+      "disclosures":["test"]
+    }]
+  }'
+```
+
+For **SD-JWT**, `disclosures` contains the selected top-level claim names (for example `test`), which the signer maps to its disclosure frame. Required DCQL claims must actually be disclosed. For **LDP VC**, omit `disclosures`; the selected credential is embedded in the JSON-LD Verifiable Presentation and signed by the crypto-provider. `claimIds` is currently **not** supported and is rejected; do not send it.
+
+Response on success: `200 {"status":"completed"}`. The service signs and sends the VP to the verifier's `response_uri`; **do not POST the VP manually after approval**. To reject instead, `POST "$BASE/presentations/$PID/reject"` with the same gateway headers (returns HTTP 204).
+
+## C. Machine holder: resolve the same VP link with automatic consent
+
+Set `externalPresentation.credentialSelectionPolicy` to your reachable policy HTTP endpoint. Send a NATS request to the holder's configured `authorization` subject. The CloudEvent **type** is `verifier.presentation.authorization.remote`; the **data** must contain:
+
+```json
+{
+  "specversion": "1.0",
+  "id": "machine-request-event-1",
+  "source": "vp-machine-client",
+  "type": "verifier.presentation.authorization.remote",
+  "datacontenttype": "application/json",
+  "data": {
+    "tenantId": "demo-tenant",
+    "groupId": "demo-account",
+    "requestId": "machine-vp-001",
+    "url": "openid4vp://authorize?client_id=decentralized_identifier%3Adid%3Aweb%3Averifier.example&request_uri=https%3A%2F%2Fverifier.example%2Fpresentation%2Fproof%2FSTATE%2Frequest-object%2Frequest.jwt",
+    "consentMode": "auto",
+    "ttl": 3600,
+    "did": "did:web:holder.example",
+    "key": "holder-key",
+    "namespace": "crypto-namespace",
+    "group": "crypto-group"
+  }
+}
+```
+
+The holder resolves the Request Object, retrieves credential candidates and POSTs to the configured policy endpoint:
+
+```json
+{
+  "tenantId":"demo-tenant",
+  "groupId":"demo-account",
+  "clientId":"decentralized_identifier:did:web:verifier.example",
+  "dcqlQuery":{"credentials":[{"id":"identity","format":"dc+sd-jwt","claims":[{"path":["test"]}]}]},
+  "credentials":[{"queryId":"identity","credentialId":"ACTUAL_CREDENTIAL_ID"}]
+}
+```
+
+The policy must return an explicit decision and a credential selection. For an SD-JWT claim `test`:
+
+```json
+{
+  "approved":true,
+  "selections":[{
+    "queryId":"identity",
+    "credentialId":"ACTUAL_CREDENTIAL_ID",
+    "disclosures":["test"]
+  }]
+}
+```
+
+For LDP VC omit `disclosures`. To deny return `{"approved":false}`. A positive decision without selections is rejected. The NATS reply CloudEvent data contains `presentation_id`, `status` (`completed`, `pending`, or `failed`) and optional `error`. The machine holder sends the VP to the verifier automatically after approval; no manual `/approve` call is needed.
+
+## D. Response modes, verifier requirements and deployment notes
+
+- Holder **outgoing** responses support `direct_post` and encrypted `direct_post.jwt` for both SD-JWT and LDP VC, depending on the incoming Request Object. For encrypted responses, the verifier must supply a compatible ECDH-ES P-256 JWK and encryption metadata.
+- This service's own **incoming verifier** endpoint currently advertises and accepts `direct_post` only. Incoming `direct_post.jwt` requires provisioning and publishing a verifier encryption keypair and implementing JWE decryption; it is intentionally rejected rather than silently treated as a missing token.
+- The verifier cryptographically validates both formats using `SignerService.PresentationVerifyUrl`; for SD-JWT it also validates the disclosed credential against DCQL. If the crypto-provider does not return `disclosedCredential`, the verifier reconstructs top-level disclosures from the already-verified compact SD-JWT and checks their digests. Nested disclosure matching is not supported by this fallback.
+- Ensure the crypto-provider verifies issuer signatures, SD-JWT `sd_hash`, KB-JWT signature and holder binding, expected `nonce` and `aud`. A successful HTTP 200 alone is **not** sufficient; it must return `{"valid":true}` and perform those checks.
+- The trusted gateway must authenticate and authorize the holder headers. The service does not treat caller-supplied headers as proof of identity.
+- Legacy `POST /internal/proofs/proof/{state}/fulfill` has been **removed**. Migrate callers to the manual Holder API or the machine NATS request/reply flow.

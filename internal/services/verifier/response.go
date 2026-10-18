@@ -3,12 +3,16 @@ package verifier
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	storageMessaging "github.com/eclipse-xfsc/credential-storage-service/pkg/messaging"
@@ -37,8 +41,18 @@ func HandleProof(c *gin.Context, requestor *PresentationRequestor, config *model
 		return
 	}
 
+	// This verifier advertises direct_post only. Reject encrypted responses
+	// explicitly instead of interpreting them as an absent vp_token.
+	if c.PostForm("response") != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "direct_post.jwt is not configured on this verifier"})
+		return
+	}
 	state := c.PostForm("state")
-	if state == "" || state != id {
+	expectedState := row.AuthorizationState
+	if expectedState == "" {
+		expectedState = id // legacy locally generated verifier transactions
+	}
+	if state == "" || state != expectedState {
 		shared.ErrorResponse(c, "Invalid state", errors.New("OID4VP response state does not match the verification transaction"))
 		return
 	}
@@ -72,6 +86,9 @@ func (requestor *PresentationRequestor) CheckPresentations(ctx context.Context, 
 		return err
 	}
 
+	if err := token.ValidateAgainst(&row.DCQLQuery); err != nil {
+		return fmt.Errorf("VP token does not satisfy DCQL: %w", err)
+	}
 	for queryID, values := range token {
 		credentialQuery, err := credentialQueryByID(row.DCQLQuery, queryID)
 		if err != nil {
@@ -110,8 +127,20 @@ func (requestor *PresentationRequestor) CheckPresentations(ctx context.Context, 
 				if err := validateDCQLCredentialMatch(queryID, object, row.DCQLQuery); err != nil {
 					return err
 				}
-			} else if credentialQuery.Format == types.SDJWT && result.DisclosedCredential != nil {
-				if err := validateDisclosedCredential(queryID, result.DisclosedCredential, *credentialQuery); err != nil {
+			} else if credentialQuery.Format == types.SDJWT {
+				// Crypto verification alone is insufficient: required DCQL claims
+				// must also be present in the disclosed, verified credential.
+				disclosed := result.DisclosedCredential
+				if disclosed == nil {
+					// Derive top-level claims locally only AFTER the crypto-provider
+					// has accepted the issuer signature and key binding.
+					var err error
+					disclosed, err = extractVerifiedSDJWTClaims(presentationBytes)
+					if err != nil {
+						return fmt.Errorf("credential query %s: extract SD-JWT claims: %w", queryID, err)
+					}
+				}
+				if err := validateDisclosedCredential(queryID, disclosed, *credentialQuery); err != nil {
 					return err
 				}
 			}
@@ -193,13 +222,14 @@ func (requestor *PresentationRequestor) verifyPresentation(ctx context.Context, 
 	req.Header.Set("x-format", format)
 
 	requestor.logger.Debug("Sending presentation to crypto-provider verification endpoint", "format", format)
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("crypto-provider presentation verify call: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
 		return nil, fmt.Errorf("read crypto-provider presentation verify response: %w", err)
 	}
@@ -212,6 +242,71 @@ func (requestor *PresentationRequestor) verifyPresentation(ctx context.Context, 
 		return nil, fmt.Errorf("decode crypto-provider presentation verify response: %w", err)
 	}
 	return &result, nil
+}
+
+// extractVerifiedSDJWTClaims reconstructs top-level disclosures for DCQL matching.
+// It MUST only be called after successful cryptographic verification of the full
+// presentation (including holder key binding) by the crypto-provider.
+// Nested disclosures are deliberately rejected until supported end-to-end.
+func extractVerifiedSDJWTClaims(compact []byte) (map[string]any, error) {
+	parts := strings.Split(string(compact), "~")
+	if len(parts) < 2 {
+		return nil, errors.New("invalid SD-JWT serialization")
+	}
+	jwtParts := strings.Split(parts[0], ".")
+	if len(jwtParts) != 3 {
+		return nil, errors.New("invalid issuer JWT")
+	}
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(jwtParts[1])
+	if err != nil {
+		return nil, err
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+		return nil, err
+	}
+	if alg, ok := payload["_sd_alg"].(string); ok && alg != "sha-256" {
+		return nil, fmt.Errorf("unsupported disclosure digest %s", alg)
+	}
+	allowed := map[string]bool{}
+	hashes, _ := payload["_sd"].([]any)
+	for _, h := range hashes {
+		if v, ok := h.(string); ok {
+			allowed[v] = true
+		}
+	}
+	// The last component is the KB-JWT, or empty if key binding is absent.
+	for _, encoded := range parts[1 : len(parts)-1] {
+		if encoded == "" {
+			continue
+		}
+		digest := sha256.Sum256([]byte(encoded))
+		if !allowed[base64.RawURLEncoding.EncodeToString(digest[:])] {
+			return nil, errors.New("unrecognized SD-JWT disclosure")
+		}
+		data, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return nil, err
+		}
+		var values []any
+		if err := json.Unmarshal(data, &values); err != nil {
+			return nil, err
+		}
+		if len(values) != 3 {
+			return nil, errors.New("unsupported SD-JWT disclosure structure")
+		}
+		name, ok := values[1].(string)
+		if !ok || name == "" {
+			return nil, errors.New("invalid disclosure claim name")
+		}
+		if _, exists := payload[name]; exists {
+			return nil, fmt.Errorf("duplicate disclosed claim %q", name)
+		}
+		payload[name] = values[2]
+	}
+	delete(payload, "_sd")
+	delete(payload, "_sd_alg")
+	return payload, nil
 }
 
 func validateDisclosedCredential(queryID string, disclosed any, credentialQuery presentation.CredentialQuery) error {
