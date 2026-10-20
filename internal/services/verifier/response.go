@@ -384,3 +384,62 @@ func (requestor *PresentationRequestor) forwardPresentation(tenantId string, req
 		return
 	}
 }
+
+// HandleGetVerifiedPresentation returns a presentation only after verification
+// and successful persistence. The state parameter is HMAC-protected by middleware.
+// @Router /v1/tenants/{tenantId}/internal/presentations/{id} [get]
+func HandleGetVerifiedPresentation(c *gin.Context) {
+	row, err := commonServices.GetEntryFromDb(c.Request.Context(), c.Param("tenantId"), c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "verification transaction not found"})
+		return
+	}
+	groupID := strings.TrimSpace(c.GetHeader("x-groupid"))
+	if groupID == "" || groupID != row.GroupId {
+		c.JSON(http.StatusForbidden, gin.H{"error": "group access denied"})
+		return
+	}
+	if row.State != string(model.PresentationReceived) || len(row.Presentation) == 0 {
+		c.JSON(http.StatusConflict, gin.H{"status": row.State, "error": "verified presentation not yet available"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"presentationId": c.Param("id"), "requestId": row.RequestId,
+		"groupId": row.GroupId, "status": row.State,
+		"presentation": row.Presentation,
+	})
+}
+
+// HandleListVerifiedPresentations lists verified presentation metadata for the
+// authenticated tenant/group context. VP tokens are intentionally omitted.
+// @Router /v1/tenants/{tenantId}/internal/presentations [get]
+func HandleListVerifiedPresentations(c *gin.Context) {
+	groupID := strings.TrimSpace(c.GetHeader("x-groupid"))
+	if groupID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "x-groupid required"})
+		return
+	}
+	rows, err := commonServices.GetEntriesFromDb(c.Request.Context(), c.Param("tenantId"), groupID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "cannot list presentations"})
+		return
+	}
+	items := make([]gin.H, 0, len(rows))
+	for _, row := range rows {
+		if row.State != string(model.PresentationReceived) || len(row.Presentation) == 0 {
+			continue
+		}
+		state, err := commonServices.EncodeVerificationState(row.GroupId, row.RequestId)
+		if err != nil {
+			continue
+		}
+		items = append(items, gin.H{
+			"presentationId":      state,
+			"requestId":           row.RequestId,
+			"groupId":             row.GroupId,
+			"status":              row.State,
+			"lastUpdateTimeStamp": row.LastUpdateTimeStamp,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"presentations": items})
+}

@@ -1,0 +1,28 @@
+{
+  "id": "employee-ldp",
+  "version": "1.0.0",
+  "dcqlQuery": {
+    "credentials": [
+      {
+        "id": "employee-ldp",
+        "format": "ldp_vc",
+        "meta": {
+          "type_values": [
+            [
+              "VerifiableCredential",
+              "EmployeeCredential"
+            ]
+          ]
+        },
+        "claims": [
+          {
+            "path": [
+              "credentialSubject",
+              "employeeId"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -140,7 +140,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 				RequestId: uuid.NewString(),
 			},
 			Namespace: tenantId,
-			Key:       key,
+			Key:       requestor.config.RequestObjectSignKey,
 			Payload:   pb,
 		}
 
@@ -182,6 +182,29 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 }
 
 func (requestor *PresentationRequestor) reply(ctx context.Context, event event.Event) (*event.Event, error) {
+	if event.Type() == messaging.PresentationResultGetType {
+		var query messaging.PresentationResultGetRequest
+		if err := json.Unmarshal(event.Data(), &query); err != nil {
+			return requestor.presentationResultReply(messaging.PresentationResultGetReply{Error: "invalid request JSON"})
+		}
+		if query.TenantID == "" || query.GroupID == "" || query.PresentationID == "" {
+			return requestor.presentationResultReply(messaging.PresentationResultGetReply{Error: "tenant_id, group_id and presentation_id required"})
+		}
+		row, err := common.GetEntryFromDb(ctx, query.TenantID, query.PresentationID)
+		if err != nil {
+			return requestor.presentationResultReply(messaging.PresentationResultGetReply{PresentationID: query.PresentationID, Error: "transaction not found"})
+		}
+		if row.GroupId != query.GroupID {
+			return requestor.presentationResultReply(messaging.PresentationResultGetReply{PresentationID: query.PresentationID, Error: "group access denied"})
+		}
+		reply := messaging.PresentationResultGetReply{PresentationID: query.PresentationID, RequestID: row.RequestId, GroupID: row.GroupId, Status: row.State}
+		if row.State == string(model.PresentationReceived) && len(row.Presentation) > 0 {
+			reply.Presentation = row.Presentation
+		} else {
+			reply.Error = "verified presentation not yet available"
+		}
+		return requestor.presentationResultReply(reply)
+	}
 
 	if strings.Compare(event.Type(), messaging.PresentationAuthorizationType) == 0 {
 
@@ -200,11 +223,10 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 			return nil, errors.New("problem during marshaling")
 		}
 
-		err = authorizationRequest.DCQLQuery.Validate()
-
-		if err != nil {
-			return requestor.AuthorizationReplyError(reply, err, "error during check presentation")
+		if authorizationRequest.PresentationPolicyID == "" {
+			return requestor.AuthorizationReplyError(reply, errors.New("presentation_policy_id required"), "invalid authorization")
 		}
+
 		if _, err = presentation.ParseClientIdentifier(authorizationRequest.ClientID); err != nil {
 			return requestor.AuthorizationReplyError(reply, err, "invalid client_id")
 		}
@@ -215,7 +237,7 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 		}
 
 		reply.PresentationId = state // compatibility: this field now carries the opaque verification state
-		reply.RequestUri = requestor.buildUri(authorizationRequest, state)
+		reply.RequestUri, err = requestor.buildUri(authorizationRequest, state)
 
 		requestOptions := common.PresentationRequestOptions{
 			TenantId:  authorizationRequest.TenantId,
@@ -225,7 +247,11 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 			ClientId:  authorizationRequest.ClientID,
 		}
 
-		err = common.AddDCQLQueryToDb(authorizationRequest.DCQLQuery, requestOptions, ctx)
+		if err != nil {
+			return requestor.AuthorizationReplyError(reply, err, "error during build uri")
+		}
+
+		_, err = requestor.CreateFromPolicy(ctx, authorizationRequest.TenantId, authorizationRequest.GroupId, authorizationRequest.PresentationPolicyID, requestOptions)
 
 		if err != nil {
 			return requestor.AuthorizationReplyError(reply, err, "error during db adding")
@@ -245,6 +271,18 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 	reply := messaging.PresentationAuthorizationCreationReply{}
 
 	return requestor.AuthorizationReplyError(reply, errors.ErrUnsupported, "error in json marshalling")
+}
+
+// CreateFromPolicy is shared by internal HTTP and NATS entrypoints.
+func (requestor *PresentationRequestor) CreateFromPolicy(ctx context.Context, tenant, group, policyID string, options common.PresentationRequestOptions) (*PresentationPolicy, error) {
+	policy, err := ResolvePresentationPolicy(ctx, requestor.config, tenant, group, policyID)
+	if err != nil {
+		return nil, err
+	}
+	if err = requestor.CreatePresentationRequest(policy.DCQLQuery, options, ctx); err != nil {
+		return nil, err
+	}
+	return policy, nil
 }
 
 func (requestor *PresentationRequestor) CreatePresentationRequest(query presentation.DCQLQuery, options common.PresentationRequestOptions, ctx context.Context) error {
@@ -293,25 +331,38 @@ func (requestor *PresentationRequestor) Alive() bool {
 	return requestor.client.Alive()
 }
 
-func (requestor *PresentationRequestor) buildUri(request messaging.PresentationAuthorizationCreationRequest, id string) string {
+func (requestor *PresentationRequestor) buildUri(
+	request messaging.PresentationAuthorizationCreationRequest,
+	id string,
+) (string, error) {
 
-	requestObjectUrl := url.URL{
-		Scheme: requestor.config.ExternalPresentation.ClientUrlSchema,
-		Host:   request.RequestObjectUri,
-		Path:   "/" + id + "/request-object/request.jwt",
+	scheme := requestor.config.ExternalPresentation.ClientUrlSchema
+
+	requestObjectURL, err := url.Parse(
+		scheme + "://" + request.RequestObjectUri,
+	)
+	if err != nil {
+		return "", fmt.Errorf("invalid request object URI: %w", err)
 	}
 
-	authUrl := url.URL{
-		Scheme: requestor.config.ExternalPresentation.ClientUrlSchema,
-		Host:   request.TargetUri,
-		Path:   "/authorize",
+	requestObjectURL.Path = strings.TrimRight(requestObjectURL.Path, "/") +
+		"/" + id + "/request-object/request.jwt"
+
+	targetURL, err := url.Parse(
+		scheme + "://" + request.TargetUri,
+	)
+	if err != nil {
+		return "", fmt.Errorf("invalid target URI: %w", err)
 	}
 
-	query := authUrl.Query()
-	query.Add("client_id", request.ClientID)
-	query.Add("request_uri", requestObjectUrl.String())
-	authUrl.RawQuery = query.Encode()
-	return requestor.config.ExternalPresentation.ClientUrlSchema + "://" + request.TargetUri + authUrl.RequestURI()
+	targetURL.Path = strings.TrimRight(targetURL.Path, "/") + "/authorize"
+
+	query := targetURL.Query()
+	query.Set("client_id", request.ClientID)
+	query.Set("request_uri", requestObjectURL.String())
+	targetURL.RawQuery = query.Encode()
+
+	return targetURL.String(), nil
 }
 
 func (requestor *PresentationRequestor) publishStatus(tenantId string, requestId string, presentationId string, status string) {
@@ -344,4 +395,16 @@ func (requestor *PresentationRequestor) publishStatus(tenantId string, requestId
 		requestor.logger.Error(err, "error in json marshalling", err)
 		return
 	}
+}
+
+func (requestor *PresentationRequestor) presentationResultReply(reply messaging.PresentationResultGetReply) (*event.Event, error) {
+	data, err := json.Marshal(reply)
+	if err != nil {
+		return nil, err
+	}
+	e, err := cloudeventprovider.NewEvent(requestor.presentationRequestTopic, messaging.PresentationResultReplyType, data)
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
 }

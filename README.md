@@ -1186,3 +1186,131 @@ For LDP VC omit `disclosures`. To deny return `{"approved":false}`. A positive d
 - Ensure the crypto-provider verifies issuer signatures, SD-JWT `sd_hash`, KB-JWT signature and holder binding, expected `nonce` and `aud`. A successful HTTP 200 alone is **not** sufficient; it must return `{"valid":true}` and perform those checks.
 - The trusted gateway must authenticate and authorize the holder headers. The service does not treat caller-supplied headers as proof of identity.
 - Legacy `POST /internal/proofs/proof/{state}/fulfill` has been **removed**. Migrate callers to the manual Holder API or the machine NATS request/reply flow.
+
+## Verifier-End-to-End-Test: HTTP und NATS
+
+Die folgenden Skripte liegen in `scripts/verifier-*.sh`. Voraussetzungen: `curl`, `jq`, `python3`; für NATS zusätzlich die `nats` CLI. Der Verifier benötigt Cassandra, einen erreichbaren Signer und Crypto-Provider sowie `stateSigningKey` und `externalPresentation.enabled: true`. Die Beispiele verwenden den Tenant-Router `/v1/tenants/{tenantId}`; ggf. vorgeschaltete Gateways müssen entsprechend routen.
+
+### DCQL vorbereiten
+
+Beispiel für SD-JWT (`dcql.json`):
+
+```json
+{"credentials":[{"id":"example-query","format":"dc+sd-jwt","meta":{"vct_values":["https://example.org/credential"]},"claims":[{"path":["test"]}]}]}
+```
+
+Für LDP VC muss `format` auf `ldp_vc` gesetzt und die DCQL-Query auf die tatsächlich verfügbaren Credentials abgestimmt werden. Verwende die vom Verifier und der OID4VP-Library unterstützten DCQL-Felder.
+
+### HTTP: Authorization-Link erzeugen
+
+```bash
+export API_BASE=http://127.0.0.1:8080
+export PUBLIC_BASE=https://verifier.example/v1/tenants/demo_tenant
+export TENANT_ID=demo_tenant GROUP_ID=test
+export CLIENT_ID='decentralized_identifier:did:web:verifier.example'
+export SIGN_KEY=verifier-key
+./scripts/verifier-http-create.sh dcql.json
+cat verifier-output/oid4vp-link.txt
+cat verifier-output/presentation_id.txt
+```
+
+Der HTTP-Endpunkt `GET /v1/tenants/{tenantId}/presentation/request?requestId=...&dcqlQuery=...` erstellt eine Transaktion, signiert das Request Object und liefert das JWT. Das Skript dekodiert dessen `state` **ohne die Signatur zu verifizieren** (nur zur URL-Konstruktion) und baut einen Link mit `client_id` und `request_uri`. Das Request Object ist abrufbar über `GET /v1/tenants/{tenantId}/presentation/proof/{state}/request-object/request.jwt`. `PUBLIC_BASE` muss öffentlich per HTTPS erreichbar sein; es darf nicht auf localhost zeigen, wenn ein externer Holder die Anfrage verarbeiten soll. Der Signer benötigt einen gültigen `SIGN_KEY` und die passende Namespace-Konfiguration.
+
+**Wichtig:** Der vorhandene `JwtResponse`-Handler setzt beim ersten Abruf bereits den Status `request_object_fetched`. Falls ein späterer Abruf durch den Holder abgelehnt wird, muss dieser Handler separat auf idempotente Abrufe angepasst werden. Der HTTP-Create-Aufruf liefert außerdem ein signiertes Request Object, während der erzeugte Link auf den separaten Request-Object-Endpunkt verweist.
+
+### HTTP: Präsentation empfangen und abrufen
+
+Die VP wird **nicht** vom Skript angenommen, sondern durch den bereits vorhandenen Verifier-Endpoint `POST /v1/tenants/{tenantId}/presentation/proof/{state}` (`application/x-www-form-urlencoded` mit `state` und `vp_token`). Das Holder-Skript oder eine Wallet sendet sie an die `response_uri` im signierten Request Object. Der Verifier validiert DCQL und die kryptografischen Proofs, speichert den VP-Token in seiner Cassandra-Tabelle und veröffentlicht einen Storage-Event.
+
+Interne Route: `GET /v1/tenants/{tenantId}/internal/presentations/{state}`. Sie gibt nur bei `presentation_received` und vorhandener VP eine JSON-Antwort mit `presentationId`, `requestId`, `groupId`, `status`, `presentation` zurück; sonst HTTP 409 (noch nicht verfügbar) bzw. 404 (unbekannt).
+
+```bash
+STATE="$(cat verifier-output/presentation_id.txt)"
+./scripts/verifier-http-get.sh "$STATE"
+./scripts/verifier-http-wait.sh "$STATE" verified-presentation.json
+```
+
+`verifier-http-list.sh` listet ausschließlich verifizierte Präsentationen (Metadaten ohne VP-Payload) der über `TENANT_ID` und `GROUP_ID` ausgewählten Gruppe. Die HTTP-Get-/Wait-Skripte verwenden ebenfalls die internen Routen und benötigen `GROUP_ID`. `verifier-http-wait.sh` fragt standardmäßig bis zu 60-mal im Abstand von 2 Sekunden ab (`ATTEMPTS`, `INTERVAL`).
+
+### NATS: Authorization-Link erzeugen
+
+```bash
+#!/usr/bin/env bash
+
+# NATS
+export NATS_URL='nats://127.0.0.1:4222'
+export NATS_SUBJECT='request'
+export NATS_TIMEOUT='30s'
+
+# Tenant
+export TENANT_ID='demo_tenant'
+export GROUP_ID='test'
+
+# Verifier-Identität
+# Muss durch die tatsächlich konfigurierte Verifier-DID ersetzt werden.
+export CLIENT_ID='decentralized_identifier:did:web:verifier.example'
+
+# Öffentlich erreichbarer Gateway-Host
+export PUBLIC_HOST='verifier.example'
+
+# Basisadressen für den XFSC Requestor
+export TARGET_URI="${PUBLIC_HOST}/api/verifier/presentation"
+export REQUESTOBJECT_URI="${PUBLIC_HOST}/api/verifier/presentation/proof"
+
+# Authorization-Gültigkeit: 5 Minuten
+export TTL=300
+
+# Authorization mit vordefinierter Presentation Policy erzeugen
+./scripts/verifier-nats-create.sh paradym-test
+```
+
+Der NATS-Request ist ein CloudEvent `verifier.presentation.authorization` mit `data.tenant_id`, `data.group_id`, `data.request_id`, `data.dcql_query`, `data.client_id`, `data.ttl`, `data.target_uri` und `data.requestobject_uri`. Die Antwort enthält `presentation_id` (HMAC-State) und `request_uri` (OID4VP-Link). **Achtung:** Die bestehende `buildUri`-Funktion nutzt `url.URL{Host: ...}`; Host-Felder mit Pfad sind in Go keine gültigen Hosts. Für öffentlich verwendbare Links ist die URL-Erzeugung im NATS-Pfad daher noch auf getrennte Host-/Pfad-Konfiguration umzustellen. Bis dahin die zurückgelieferte `request_uri` vor dem Wallet-Aufruf kontrollieren.
+
+### NATS: Empfangsstatus und verifizierte Präsentation
+
+```bash
+./scripts/verifier-nats-watch.sh
+./scripts/verifier-nats-get.sh "$STATE" verified-nats.json
+```
+
+`verifier-nats-watch.sh` lauscht auf `topics.proofNotify` (`presentation.proof.notify` im Beispiel). Neue NATS-Request-Art `verifier.presentation.result.get` auf `topics.presentationRequest` mit `{tenant_id,presentation_id}`; Reply-Art `verifier.presentation.result.reply` mit `status`, `presentation` oder `error`. Der NATS-Retrieve-Handler liest die **lokal persistierte, verifizierte** Präsentation, nicht das externe Credential-Storage-Service. Die bestehende Veröffentlichung an das Credential-Storage-Service erfolgt weiterhin über `topics.storageRequest` und `storageMessaging.StorePresentationType`.
+
+**Sicherheit:** Die HTTP-Retrieval-Route prüft den signierten State, besitzt aber in dieser Änderung **keine zusätzliche Autorisierung auf Tenant-/Group-Ebene**. Der NATS-Result-Handler setzt voraus, dass der NATS-Subject über Broker-ACLs geschützt ist. Beide Retrieval-Endpunkte müssen vor öffentlicher Freigabe an eure AuthN/AuthZ-Policy gebunden werden. `direct_post.jwt`-Empfang ist weiterhin nicht implementiert; dieser Verifier verwendet `direct_post`.
+
+
+### Interne und externe Verifier-Schnittstellen (Routing-Trennung)
+
+- **Extern:** `GET /presentation/request` (Request-Erzeugung, derzeit konfigurationsabhängig), `GET /presentation/proof/{state}/request-object/request.jwt` (Wallet Request-Object Fetch), `POST /presentation/proof/{state}` (OID4VP `direct_post` Response). Diese Endpunkte müssen für Wallets erreichbar sein, sofern der entsprechende Flow aktiviert ist.
+- **Intern:** `GET /internal/presentations` (nur erfolgreich verifizierte Einträge als Metadaten), `GET /internal/presentations/{state}` (verifizierte VP). Beide Endpunkte sind relativ zum vom Server bereitgestellten Tenant-Prefix `/v1/tenants/{tenantId}`. `x-groupid` ist verpflichtend und muss mit der gespeicherten Gruppe übereinstimmen.
+- **Bereits vorhandene interne Legacy-API:** `/internal/list/proofs/{groupId}` listet vollständige Transaktionsdatensätze und ist **nicht** als öffentliche API gedacht. Für neue Clients die datensparsame `/internal/presentations`-Route verwenden.
+- **NATS (intern):** `verifier.presentation.authorization` erstellt Requests; `verifier.presentation.result.get` holt eine VP mit `tenant_id`, `group_id` und `presentation_id`; Notifications über `presentation.proof.notify` enthalten keine VP-Payload. NATS-Zugriff muss über Broker-ACLs auf vertrauenswürdige Services beschränkt werden.
+
+Beispiele:
+
+```bash
+export API_BASE=http://127.0.0.1:8080
+export TENANT_ID=demo_tenant
+export GROUP_ID=test
+./scripts/verifier-http-list.sh
+./scripts/verifier-http-get.sh "$(cat verifier-output/presentation_id.txt)"
+./scripts/verifier-nats-get.sh "$(cat verifier-output/presentation_id.txt)"
+```
+
+**Sicherheitsgrenze:** Die Trennung der Router-Gruppen ist eine strukturelle Trennung, keine eigenständige Authentifizierung. Der Gateway/Ingress muss `/internal/**` sperren und den Tenant-/Gruppenkontext aus einer vertrauenswürdigen Identität setzen; frei wählbare `x-groupid`-Header reichen für Produktionszugriff nicht aus. Die NATS-Subjects müssen separat per ACL geschützt werden. Der HTTP-Create-Test (`verifier-http-create.sh`) verwendet derzeit den externen `/presentation/request`-Endpoint und sollte bei einem späteren produktiven Design auf einen internen Create-Endpoint umgestellt werden.
+
+
+## Presentation Policies (Policy-ID statt DCQL-Datei)
+
+Siehe [scripts/README-policy.md](scripts/README-policy.md) für Konfiguration, Test-Policy-Service, HTTP-/NATS-Aufrufe und bekannte Einschränkungen.
+
+### Demo Presentation Policy Service (Docker)
+
+Die bisherigen `test-policy-service/`-Fixtures liegen jetzt unter [`deployment/docker/demo-presentation-policy-service/`](deployment/docker/demo-presentation-policy-service/). Der Ordner enthält `Dockerfile`, `compose.yaml`, `server.py`, `policies/` und eine eigene [README](deployment/docker/demo-presentation-policy-service/README.md).
+
+```bash
+cd deployment/docker
+docker compose up -d --build
+curl -fsS 'http://127.0.0.1:8099/v1/presentation-policies/paradym-test?tenantId=demo_tenant&groupId=test' | jq .
+```
+
+Im globalen Compose wird `presentation-policy` automatisch gebaut und als gesunde Abhängigkeit des Verifiers gestartet. Die Verifier-Konfiguration verwendet `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL=http://presentation-policy:8080` und `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS=10`; der Request-Object-Schlüssel wird über `VERIFICATION_REQUEST_OBJECT_SIGN_KEY` konfiguriert (Default nur für lokale Tests). Der Test-Service ist am Host ausschließlich über `127.0.0.1:8099` erreichbar. **Nicht öffentlich freigeben:** Tenant/Group werden nur auf Vorhandensein geprüft.

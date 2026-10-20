@@ -42,3 +42,7 @@ func HandleGetProofRequestByRequestId(c *gin.Context, cfg *model.Config) {
 }
 func HandleAssignProof(c *gin.Context, cfg *model.Config) { holder.HandleAssignProof(c, cfg) }
 func HandleListProof(c *gin.Context, cfg *model.Config)   { holder.HandleListProof(c, cfg) }
+
+func HandleGetVerifiedPresentation(c *gin.Context) { verifier.HandleGetVerifiedPresentation(c) }
+
+func HandleListVerifiedPresentations(c *gin.Context) { verifier.HandleListVerifiedPresentations(c) }

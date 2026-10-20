@@ -13,13 +13,13 @@ const (
 
 type PresentationAuthorizationCreationRequest struct {
 	common.Request
-	DCQLQuery        presentation.DCQLQuery `json:"dcql_query"`
-	ClientID         string                 `json:"client_id"`
-	Ttl              int                    `json:"ttl"`
-	TenantUri        string                 `json:"tenant_uri"`
-	TargetUri        string                 `json:"target_uri"`
-	RequestObjectUri string                 `json:"requestobject_uri"`
-	Nonce            []byte                 `json:"nonce"`
+	PresentationPolicyID string `json:"presentation_policy_id"`
+	ClientID             string `json:"client_id"`
+	Ttl                  int    `json:"ttl"`
+	TenantUri            string `json:"tenant_uri"`
+	TargetUri            string `json:"target_uri"`
+	RequestObjectUri     string `json:"requestobject_uri"`
+	Nonce                []byte `json:"nonce"`
 }
 
 type PresentationAuthorizationCreationReply struct {
@@ -54,4 +54,22 @@ type ProofNotifyEvent struct {
 	common.Reply
 	PresentationId string `json:"presentation_id"`
 	Status         string `json:"status"`
+}
+
+const PresentationResultGetType = "verifier.presentation.result.get"
+const PresentationResultReplyType = "verifier.presentation.result.reply"
+
+type PresentationResultGetRequest struct {
+	TenantID       string `json:"tenant_id"`
+	GroupID        string `json:"group_id"`
+	PresentationID string `json:"presentation_id"`
+}
+
+type PresentationResultGetReply struct {
+	PresentationID string               `json:"presentation_id"`
+	RequestID      string               `json:"request_id,omitempty"`
+	GroupID        string               `json:"group_id,omitempty"`
+	Status         string               `json:"status,omitempty"`
+	Presentation   presentation.VPToken `json:"presentation,omitempty"`
+	Error          string               `json:"error,omitempty"`
 }
