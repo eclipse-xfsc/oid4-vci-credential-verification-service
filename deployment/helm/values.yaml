@@ -13,7 +13,7 @@ image:
 # ResourceProviders and Cassandra is provisioned through the ResourceClaim.
 podAnnotations:
   inject.xfsc.io/enabled: "false"
-  inject.xfsc.io/needs: "nats,cassandra,signer,didresolver,storage"
+  inject.xfsc.io/needs: "nats,cassandra,signer,did-resolver,storage"
   inject.xfsc.io/env-prefix: "CREDENTIALVERIFICATION"
 
 resourceProvider:
