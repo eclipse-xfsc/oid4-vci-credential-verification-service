@@ -61,8 +61,6 @@ spec:
               value: {{ .Values.config.messaging.protocol | quote }}
             - name: CREDENTIALVERIFICATION_NATS_QUEUE_GROUP
               value: {{ .Values.config.messaging.nats.queueGroup | quote }}
-            - name: CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT
-              value: {{ .Values.config.messaging.nats.timeoutInSec | quote }}
             - name: CREDENTIALVERIFICATION_AUTHORIZATION
               value: {{ .Values.config.topics.authorization | quote }}
             - name: CREDENTIALVERIFICATION_AUTHORIZATIONREPLY
@@ -94,6 +92,8 @@ spec:
             # Standalone deployment: resolve all dependencies from values.yaml.
             - name: CREDENTIALVERIFICATION_NATS_URL
               value: {{ .Values.config.messaging.nats.url | quote }}
+            - name: CREDENTIALVERIFICATION_NATS_REQUEST_TIMEOUT
+              value: {{ .Values.config.messaging.nats.timeoutInSec | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_HOSTS
               value: {{ .Values.config.cassandra.host | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_KEYSPACE
