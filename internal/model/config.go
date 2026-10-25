@@ -14,7 +14,7 @@ type Config struct {
 	ServingPort       string `mapstructure:"servingPort" envconfig:"SERVINGPORT" default:"8080"`
 	PublicBasePath    string `mapstructure:"publicBasePath" envconfig:"PUBLICBASEPATH" default:"/api/presentation/proof"`
 	Cassandra         struct {
-		Host     string `mapstructure:"host" envconfig:"HOST"`
+		Hosts    string `mapstructure:"hosts" envconfig:"HOSTS"`
 		KeySpace string `mapstructure:"keyspace" envconfig:"KEYSPACE"`
 		User     string `mapstructure:"user" envconfig:"USER"`
 		Password string `mapstructure:"password" envconfig:"PASSWORD"`

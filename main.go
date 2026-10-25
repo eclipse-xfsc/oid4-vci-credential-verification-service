@@ -26,7 +26,7 @@ var env *common.Environment
 func connectDb() error {
 	// Establish connections
 	cfg := env.GetConfig()
-	dbSession, err := connection.Connection(cfg.Cassandra.Host, cfg.Cassandra.User, cfg.Cassandra.Password)
+	dbSession, err := connection.Connection(cfg.Cassandra.Hosts, cfg.Cassandra.User, cfg.Cassandra.Password)
 	if err != nil {
 		env.GetLogger().Error(err, "Database could not be connected")
 		return err
