@@ -85,6 +85,10 @@ spec:
               value: info
             - name: CREDENTIALVERIFICATION_IS_DEV
               value: {{ .Values.config.isDev | quote }}
+            - name: CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL
+              value: {{ .Values.config.presentationPolicy.url | quote }}
+            - name: CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS
+              value: {{ .Values.config.presentationPolicy.timeoutSeconds | quote }}
 
             {{- if not $injectionEnabled }}
             # Standalone deployment: resolve all dependencies from values.yaml.

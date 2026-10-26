@@ -80,6 +80,9 @@ config:
   servingPort: 8080
   country: DE
   region: EU
+  presentationPolicy:
+    url: "http://presentation-policy-service:8080"
+    timeoutSeconds: 10
   # HTTP base URL of Credential Storage in DIRECT mode. A future tenant service
   # will replace the static country/region lookup, not this client contract.
   storageServiceUrl: http://credential-storage-service.default.svc.cluster.local:8080
