@@ -54,16 +54,6 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	if groupId == "" || requestId == "" {
 		return nil, errors.New("groupId and requestId must not be empty")
 	}
-	if config.ExternalPresentation.ClientIdPolicy != "" {
-		clientIdObject := map[string]interface{}{"clientId": clientId}
-		res, err := GetPolicyResult(clientIdObject, config.ExternalPresentation.ClientIdPolicy)
-		if err != nil {
-			return nil, err
-		}
-		if !policyAllows(res) {
-			return nil, errors.New("policy forbids the processing")
-		}
-	}
 	object, err := getRequestObject(request_uri, clientId, ctx)
 	if err != nil {
 		return nil, err

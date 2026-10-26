@@ -120,7 +120,6 @@ isDev: false
 country: DE
 region: EU
 externalPresentation:
-  clientIdPolicy: http://policy-service:8080/policy/client
   credentialSelectionPolicy: http://policy-service:8080/policy/credential-selection
 ```
 
@@ -1314,3 +1313,7 @@ curl -fsS 'http://127.0.0.1:8099/v1/presentation-policies/paradym-test?tenantId=
 ```
 
 Im globalen Compose wird `presentation-policy` automatisch gebaut und als gesunde Abhängigkeit des Verifiers gestartet. Die Verifier-Konfiguration verwendet `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL=http://presentation-policy:8080` und `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS=10`; der Request-Object-Schlüssel wird über `VERIFICATION_REQUEST_OBJECT_SIGN_KEY` konfiguriert (Default nur für lokale Tests). Der Test-Service ist am Host ausschließlich über `127.0.0.1:8099` erreichbar. **Nicht öffentlich freigeben:** Tenant/Group werden nur auf Vorhandensein geprüft.
+
+### Verifier client ID
+
+The internal HTTP authorization endpoint requires the trusted tenant-gateway header `X-DID` and constructs `client_id` as `decentralized_identifier:<X-DID>`. `clientId` in the HTTP body and the former `clientIdPolicy` setting are no longer used. For NATS, the event has no HTTP headers: the CLI script derives the same client ID from the required `DID` environment variable; producers must provide a tenant-verified DID.

@@ -18,7 +18,12 @@ NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 NATS_SUBJECT="${NATS_SUBJECT:-presentation.request}"
 TENANT_ID="${TENANT_ID:-demo_tenant}"
 GROUP_ID="${GROUP_ID:-test}"
-CLIENT_ID="${CLIENT_ID:?Set CLIENT_ID}"
+DID="${DID:?Set DID (e.g. did:web:tenant.example.org)}"
+if [[ ! "$DID" =~ ^did:[a-z0-9]+:.+ ]] || [[ "$DID" =~ [[:space:]\?\#] ]] || [[ "$DID" == *: ]]; then
+  echo "DID must be a valid DID" >&2
+  exit 2
+fi
+CLIENT_ID="decentralized_identifier:${DID}"
 REQUEST_ID="${REQUEST_ID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
 TTL="${TTL:-3600}"
 

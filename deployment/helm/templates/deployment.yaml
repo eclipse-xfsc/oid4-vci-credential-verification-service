@@ -79,8 +79,6 @@ spec:
               value: {{ .Values.config.externalPresentation.clientUrlSchema | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_REQUESTOBJECTPOLICY
               value: {{ .Values.config.externalPresentation.requestObjectPolicy | quote }}
-            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTIDPOLICY
-              value: {{ .Values.config.externalPresentation.clientIdPolicy | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CREDENTIALSELECTIONPOLICY
               value: {{ .Values.config.externalPresentation.credentialSelectionPolicy | quote }}
             - name: CREDENTIALVERIFICATION_LOG_LEVEL

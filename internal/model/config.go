@@ -36,7 +36,6 @@ type Config struct {
 		Enabled                   bool   `mapstructure:"enabled" envconfig:"ENABLED"`
 		AuthorizeEndpoint         string `mapstructure:"authorizeEndpoint" envconfig:"AUTHORIZEENDPOINT"`
 		RequestObjectPolicy       string `mapstructure:"requestObjectPolicy" envconfig:"REQUESTOBJECTPOLICY"`
-		ClientIdPolicy            string `mapstructure:"clientIdPolicy"  envconfig:"CLIENTIDPOLICY"`
 		ClientUrlSchema           string `mapstructure:"clientUrlSchema" envconfig:"CLIENTURLSCHEMA" default:"https"`
 		CredentialSelectionPolicy string `mapstructure:"credentialSelectionPolicy" envconfig:"CREDENTIALSELECTIONPOLICY"`
 	} `mapstructure:"externalpresentation" envconfig:"EXTERNALPRESENTATION"`

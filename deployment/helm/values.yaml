@@ -99,7 +99,6 @@ config:
     authorizeEndpoint: /wallet/authorize
     requestObjectPolicy: ""
     credentialSelectionPolicy: ""
-    clientIdPolicy: ""
     clientUrlSchema: https
 
   signer:

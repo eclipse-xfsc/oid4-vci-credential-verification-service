@@ -23,10 +23,19 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 			var body struct {
 				PresentationPolicyID string `json:"presentationPolicyId"`
 				TTL                  int    `json:"ttl"`
-				ClientID             string `json:"clientId"`
 			}
-			if err := c.ShouldBindJSON(&body); err != nil || body.PresentationPolicyID == "" || body.ClientID == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "presentationPolicyId and clientId required"})
+			if err := c.ShouldBindJSON(&body); err != nil || body.PresentationPolicyID == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "presentationPolicyId required"})
+				return
+			}
+			clientID, err := svcCommon.ClientIDFromDID(c.GetHeader("X-DID"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			origin, err := svcCommon.TenantOrigin(c.GetHeader("X-ORIGIN"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
 			tenant := c.Param("tenantId")
@@ -43,7 +52,7 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 				return
 			}
 			requestID := uuid.NewString()
-			options := svcCommon.PresentationRequestOptions{TenantId: tenant, GroupId: group, RequestId: requestID, Ttl: body.TTL, ClientId: body.ClientID}
+			options := svcCommon.PresentationRequestOptions{TenantId: tenant, GroupId: group, RequestId: requestID, Ttl: body.TTL, ClientId: clientID}
 			policy, err := requestor.CreateFromPolicy(c.Request.Context(), tenant, group, body.PresentationPolicyID, options)
 			if err != nil {
 				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -54,13 +63,8 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			origin, err := svcCommon.TenantOrigin(c.GetHeader("X-ORIGIN"))
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
 			requestURI := origin.String() + "/api/verifier/presentation/proof/" + url.PathEscape(state) + "/request-object/request.jwt"
-			link := "openid4vp://?" + url.Values{"request_uri": {requestURI}, "client_id": {body.ClientID}}.Encode()
+			link := "openid4vp://?" + url.Values{"request_uri": {requestURI}, "client_id": {clientID}}.Encode()
 			c.JSON(http.StatusCreated, gin.H{"presentationId": state, "requestId": requestID, "presentationPolicyId": policy.ID, "policyVersion": policy.Version, "authorizationUrl": link, "requestUri": requestURI, "ttl": body.TTL})
 		})
 

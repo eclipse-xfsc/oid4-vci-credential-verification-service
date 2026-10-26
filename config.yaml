@@ -11,7 +11,6 @@ externalPresentation:
   authorizeEndpoint: http://localhost:8080
   requestObjectPolicy: 
   credentialSelectionPolicy: ""
-  clientIdPolicy:
 signerService:
   presentationVerifyUrl: http://localhost:9000/v1/presentation/verify
   presentationSignUrl: http://localhost:9000/v1/presentation/proof
