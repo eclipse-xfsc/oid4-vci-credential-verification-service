@@ -96,7 +96,7 @@ config:
 
   externalPresentation:
     enabled: true
-    authorizeEndpoint: https://holder-application.example/consent
+    authorizeEndpoint: /wallet/authorize
     requestObjectPolicy: ""
     credentialSelectionPolicy: ""
     clientIdPolicy: ""

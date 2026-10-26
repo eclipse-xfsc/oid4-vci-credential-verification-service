@@ -6,7 +6,6 @@ import (
 	"github.com/google/uuid"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/middleware"
@@ -55,14 +54,12 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 				return
 			}
-			public := strings.TrimRight(config.PublicBasePath, "/")
-			// PUBLICBASEPATH must be an absolute HTTPS origin + tenant prefix for this endpoint.
-			base, err := url.Parse(public)
-			if err != nil || base.Scheme != "https" || base.Host == "" {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "PUBLICBASEPATH must be absolute HTTPS URL to public tenant prefix"})
+			origin, err := svcCommon.TenantOrigin(c.GetHeader("X-ORIGIN"))
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 				return
 			}
-			requestURI := public + "/presentation/proof/" + url.PathEscape(state) + "/request-object/request.jwt"
+			requestURI := origin.String() + "/api/verifier/presentation/proof/" + url.PathEscape(state) + "/request-object/request.jwt"
 			link := "openid4vp://?" + url.Values{"request_uri": {requestURI}, "client_id": {body.ClientID}}.Encode()
 			c.JSON(http.StatusCreated, gin.H{"presentationId": state, "requestId": requestID, "presentationPolicyId": policy.ID, "policyVersion": policy.Version, "authorizationUrl": link, "requestUri": requestURI, "ttl": body.TTL})
 		})

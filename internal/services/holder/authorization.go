@@ -171,7 +171,11 @@ func ResolveAuthUrl(c *gin.Context, config *model.Config) (*url.URL, error) {
 			}
 		}
 	}
-	authURL, err = shared.ValidateOutboundURL(config.ExternalPresentation.AuthorizeEndpoint, config, true)
+	endpoint, resolveErr := shared.ResolveTenantEndpoint(c.GetHeader("X-ORIGIN"), config.ExternalPresentation.AuthorizeEndpoint)
+	if resolveErr != nil {
+		return nil, shared.ErrorResponse(c, "AuthorizeEndpoint could not be resolved", resolveErr)
+	}
+	authURL, err = shared.ValidateOutboundURL(endpoint, config, true)
 	if err != nil {
 		return nil, shared.ErrorResponse(c, "AuthorizeEndpoint is not parsable", err)
 	}
