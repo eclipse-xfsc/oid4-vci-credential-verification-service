@@ -5,3 +5,4 @@
 *.lock
 __debug_*
 *.zip
+verifier-output

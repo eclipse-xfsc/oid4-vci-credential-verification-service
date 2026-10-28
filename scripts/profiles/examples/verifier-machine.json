@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "did": "did:web:demo-tenant.dccuitl.de",
-  "origin": "https://demo-tenant.dccuitl.de",
+  "did": "did:web:demo-tenant.example.de",
+  "origin": "https://demo-tenant.example.de",
   "keyNamespace": "ocm-wstack",
   "keyId": "eckey",
   "signingAlgorithm": "ES256",
