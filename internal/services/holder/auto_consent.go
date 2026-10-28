@@ -17,7 +17,11 @@ func AutoConsent(ctx context.Context, cfg *model.Config, row *model.Verification
 	if row.ConsentMode != model.ConsentAuto {
 		return errors.New("auto consent is not enabled for this request")
 	}
-	if cfg.ExternalPresentation.CredentialSelectionPolicy == "" {
+	profile, err := shared.GetPresentationProfile(ctx, row.TenantId, row.GroupId, "holder", "machine")
+	if err != nil {
+		return err
+	}
+	if profile.CredentialSelectionPolicyURL == "" {
 		return errors.New("auto consent policy endpoint not configured")
 	}
 	groups, err := resolveCredentials(ctx, cfg, row)
@@ -30,7 +34,7 @@ func AutoConsent(ctx context.Context, cfg *model.Config, row *model.Verification
 			ids = append(ids, CredentialSelection{QueryId: g.Id, CredentialID: id})
 		}
 	}
-	result, err := GetPolicyResult(map[string]interface{}{"tenantId": row.TenantId, "groupId": row.GroupId, "clientId": row.ClientId, "dcqlQuery": row.DCQLQuery, "credentials": ids}, cfg.ExternalPresentation.CredentialSelectionPolicy)
+	result, err := GetPolicyResult(map[string]interface{}{"tenantId": row.TenantId, "groupId": row.GroupId, "clientId": row.ClientId, "dcqlQuery": row.DCQLQuery, "credentials": ids}, profile.CredentialSelectionPolicyURL)
 	if err != nil {
 		return err
 	}

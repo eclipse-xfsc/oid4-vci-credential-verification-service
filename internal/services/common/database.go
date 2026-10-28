@@ -23,11 +23,12 @@ func scanEntries(iter connection.IterInterface) ([]model.VerificationEntry, erro
 	for {
 		var partition, region, country, tenantId, groupId, requestId string
 		var definition, pres, redirectURI, status, nonce, responseURI, responseMode, responseType, clientID, authorizationState, clientMetadata, consentMode string
+		var profileInteraction, profileKeyNamespace, profileKeyID, profileOrigin string
 		var lastUpdate time.Time
-		if !iter.Scan(&partition, &region, &country, &tenantId, &groupId, &requestId, &definition, &pres, &redirectURI, &status, &lastUpdate, &nonce, &responseURI, &responseMode, &responseType, &clientID, &authorizationState, &clientMetadata, &consentMode) {
+		if !iter.Scan(&partition, &region, &country, &tenantId, &groupId, &requestId, &definition, &pres, &redirectURI, &status, &lastUpdate, &nonce, &responseURI, &responseMode, &responseType, &clientID, &authorizationState, &clientMetadata, &consentMode, &profileInteraction, &profileKeyNamespace, &profileKeyID, &profileOrigin) {
 			break
 		}
-		row := model.VerificationEntry{ConsentMode: consentMode, Partition: partition, Region: region, Country: country, TenantId: tenantId, GroupId: groupId, RequestId: requestId, RedirectUri: redirectURI, State: status, LastUpdateTimeStamp: lastUpdate, Nonce: nonce, ResponseUri: responseURI, ResponseMode: responseMode, ResponseType: responseType, ClientId: clientID, AuthorizationState: authorizationState}
+		row := model.VerificationEntry{ProfileOrigin: profileOrigin, ProfileInteraction: profileInteraction, ProfileKeyNamespace: profileKeyNamespace, ProfileKeyID: profileKeyID, ConsentMode: consentMode, Partition: partition, Region: region, Country: country, TenantId: tenantId, GroupId: groupId, RequestId: requestId, RedirectUri: redirectURI, State: status, LastUpdateTimeStamp: lastUpdate, Nonce: nonce, ResponseUri: responseURI, ResponseMode: responseMode, ResponseType: responseType, ClientId: clientID, AuthorizationState: authorizationState}
 		if definition != "" {
 			b, err := base64.RawStdEncoding.DecodeString(definition)
 			if err != nil {
@@ -77,7 +78,7 @@ func getEntryByKey(ctx context.Context, tenantId, groupId, requestId string) (*m
 	}
 	env := appCommon.GetEnvironment()
 	partition := env.GetAccountPartition(groupId)
-	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId,authorizationState,clientMetadata,consent_mode`
+	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId,authorizationState,clientMetadata,consent_mode,profile_interaction,profile_key_namespace,profile_key_id,profile_origin`
 	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`, selectCols, presentationsTable)
 	rows, err := scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
 	if err != nil {
@@ -107,17 +108,21 @@ func GetEntriesFromDb(ctx context.Context, tenantId, groupId string) ([]model.Ve
 	}
 	env := appCommon.GetEnvironment()
 	partition := env.GetAccountPartition(groupId)
-	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId,authorizationState,clientMetadata,consent_mode`
+	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId,authorizationState,clientMetadata,consent_mode,profile_interaction,profile_key_namespace,profile_key_id,profile_origin`
 	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=?`, selectCols, presentationsTable)
 	return scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
 }
 
 type PresentationRequestOptions struct {
-	TenantId  string `json:"tenantId"`
-	RequestId string `json:"requestId"`
-	GroupId   string `json:"groupId"`
-	Ttl       int    `json:"ttl"`
-	ClientId  string `json:"clientId"`
+	TenantId            string `json:"tenantId"`
+	RequestId           string `json:"requestId"`
+	GroupId             string `json:"groupId"`
+	Ttl                 int    `json:"ttl"`
+	ClientId            string `json:"clientId"`
+	ProfileOrigin       string
+	ProfileInteraction  string
+	ProfileKeyNamespace string
+	ProfileKeyID        string
 }
 
 func AddDCQLQueryToDb(pd presentation.DCQLQuery, options PresentationRequestOptions, ctx context.Context) error {
@@ -137,8 +142,8 @@ func AddDCQLQueryToDb(pd presentation.DCQLQuery, options PresentationRequestOpti
 	if _, err = rand.Read(nonce); err != nil {
 		return err
 	}
-	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,dcqlQuery,status,last_update_timestamp,nonce,clientId,consent_mode) VALUES(?,?,?,?,?,?,?,?,toTimestamp(now()),?,?,?) USING TTL ?`
-	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawURLEncoding.EncodeToString(nonce), options.ClientId, model.ConsentManual, options.Ttl).WithContext(ctx).Exec()
+	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,dcqlQuery,status,last_update_timestamp,nonce,clientId,consent_mode,profile_interaction,profile_key_namespace,profile_key_id,profile_origin) VALUES(?,?,?,?,?,?,?,?,toTimestamp(now()),?,?,?,?,?,?,?) USING TTL ?`
+	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawURLEncoding.EncodeToString(nonce), options.ClientId, model.ConsentManual, options.ProfileInteraction, options.ProfileKeyNamespace, options.ProfileKeyID, options.ProfileOrigin, options.Ttl).WithContext(ctx).Exec()
 }
 
 func updateKey(ctx context.Context, tenantId, id string) (*model.VerificationEntry, error) {

@@ -13,13 +13,13 @@ const (
 
 type PresentationAuthorizationCreationRequest struct {
 	common.Request
-	PresentationPolicyID string `json:"presentation_policy_id"`
-	ClientID             string `json:"client_id"`
-	Ttl                  int    `json:"ttl"`
-	TenantUri            string `json:"tenant_uri"`
-	TargetUri            string `json:"target_uri"`
-	RequestObjectUri     string `json:"requestobject_uri"`
-	Nonce                []byte `json:"nonce"`
+	PermissionSet    string `json:"permission_set"`
+	ClientID         string `json:"client_id"`
+	Ttl              int    `json:"ttl"`
+	TenantUri        string `json:"tenant_uri"`
+	TargetUri        string `json:"target_uri"`
+	RequestObjectUri string `json:"requestobject_uri"`
+	Nonce            []byte `json:"nonce"`
 }
 
 type PresentationAuthorizationCreationReply struct {

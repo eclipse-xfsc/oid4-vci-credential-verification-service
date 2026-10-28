@@ -73,22 +73,20 @@ spec:
               value: {{ .Values.config.topics.presentationRequest | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED
               value: {{ .Values.config.externalPresentation.enabled | quote }}
-            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_AUTHORIZEENDPOINT
-              value: {{ .Values.config.externalPresentation.authorizeEndpoint | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA
               value: {{ .Values.config.externalPresentation.clientUrlSchema | quote }}
-            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_REQUESTOBJECTPOLICY
-              value: {{ .Values.config.externalPresentation.requestObjectPolicy | quote }}
-            - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CREDENTIALSELECTIONPOLICY
-              value: {{ .Values.config.externalPresentation.credentialSelectionPolicy | quote }}
+            - name: CREDENTIALVERIFICATION_PROFILE_ADMIN_JWKS_URL
+              value: {{ .Values.profileAdminAuth.jwksUrl | default "" | quote }}
+            - name: CREDENTIALVERIFICATION_PROFILE_ADMIN_ISSUER
+              value: {{ .Values.profileAdminAuth.issuer | default "" | quote }}
+            - name: CREDENTIALVERIFICATION_PROFILE_ADMIN_AUDIENCE
+              value: {{ .Values.profileAdminAuth.audience | default "" | quote }}
+            - name: CREDENTIALVERIFICATION_PROFILE_ADMIN_SCOPE
+              value: {{ .Values.profileAdminAuth.scope | default "presentation-profiles:write" | quote }}
             - name: CREDENTIALVERIFICATION_LOG_LEVEL
               value: info
             - name: CREDENTIALVERIFICATION_IS_DEV
               value: {{ .Values.config.isDev | quote }}
-            - name: CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL
-              value: {{ .Values.config.presentationPolicy.url | quote }}
-            - name: CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS
-              value: {{ .Values.config.presentationPolicy.timeoutSeconds | quote }}
 
             {{- if not $injectionEnabled }}
             # Standalone deployment: resolve all dependencies from values.yaml.

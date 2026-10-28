@@ -19,23 +19,79 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 		config := common.GetEnvironment().GetConfig()
 		g := rg.Group(services.InternalApiGroup)
 
+		// Administrative profile API: expose only through the trusted internal gateway.
+		admin := g.Group("/presentation-profiles", middleware.ProfileAdminJWT())
+		admin.GET("", func(c *gin.Context) {
+			tenant, group := c.Param("tenantId"), c.GetHeader("x-groupid")
+			if tenant == "" || group == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "tenant and x-groupid required"})
+				return
+			}
+			profiles, err := svcCommon.ListPresentationProfilesForAdmin(c.Request.Context(), tenant, group)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list presentation profiles"})
+				return
+			}
+			c.JSON(http.StatusOK, profiles)
+		})
+		admin.DELETE("/:profileType/:interactionType", func(c *gin.Context) {
+			tenant, group := c.Param("tenantId"), c.GetHeader("x-groupid")
+			if tenant == "" || group == "" || !svcCommon.ValidProfileType(c.Param("profileType")) || !svcCommon.ValidInteractionType(c.Param("interactionType")) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid tenant, group, profile type or interaction type"})
+				return
+			}
+			if err := svcCommon.DeletePresentationProfileForAdmin(c.Request.Context(), tenant, group, c.Param("profileType"), c.Param("interactionType")); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete presentation profile"})
+				return
+			}
+			c.Status(http.StatusNoContent)
+		})
+		admin.GET("/:profileType/:interactionType", func(c *gin.Context) {
+			tenant, group := c.Param("tenantId"), c.GetHeader("x-groupid")
+			profile, err := svcCommon.GetPresentationProfileForAdmin(c.Request.Context(), tenant, group, c.Param("profileType"), c.Param("interactionType"))
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, profile)
+		})
+		admin.PUT("/:profileType/:interactionType", func(c *gin.Context) {
+			tenant, group := c.Param("tenantId"), c.GetHeader("x-groupid")
+			if tenant == "" || group == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "tenant and group required"})
+				return
+			}
+			var profile svcCommon.PresentationProfile
+			if err := c.ShouldBindJSON(&profile); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			profile.TenantID = tenant
+			profile.GroupID = group
+			profile.ProfileType = c.Param("profileType")
+			profile.InteractionType = c.Param("interactionType")
+			if profile.ProfileID == uuid.Nil {
+				profile.ProfileID = uuid.New()
+			}
+			// Preserve the stable UUID across updates.
+			old, err := svcCommon.GetPresentationProfileForAdmin(c.Request.Context(), tenant, group, profile.ProfileType, profile.InteractionType)
+			if err == nil {
+				profile.ProfileID = old.ProfileID
+				profile.CreatedAt = old.CreatedAt
+			}
+			if err := svcCommon.SavePresentationProfile(c.Request.Context(), &profile); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, profile)
+		})
 		g.POST("/presentations/authorization", func(c *gin.Context) {
 			var body struct {
-				PresentationPolicyID string `json:"presentationPolicyId"`
-				TTL                  int    `json:"ttl"`
+				PermissionSet string `json:"permissionSet"`
+				TTL           int    `json:"ttl"`
 			}
-			if err := c.ShouldBindJSON(&body); err != nil || body.PresentationPolicyID == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "presentationPolicyId required"})
-				return
-			}
-			clientID, err := svcCommon.ClientIDFromDID(c.GetHeader("X-DID"))
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-			origin, err := svcCommon.TenantOrigin(c.GetHeader("X-ORIGIN"))
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			if err := c.ShouldBindJSON(&body); err != nil || body.PermissionSet == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "permissionSet required"})
 				return
 			}
 			tenant := c.Param("tenantId")
@@ -44,16 +100,32 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 				c.JSON(http.StatusBadRequest, gin.H{"error": "tenantId and x-groupid required"})
 				return
 			}
-			if body.TTL == 0 {
-				body.TTL = 3600
-			}
-			if body.TTL < 1 || body.TTL > 86400 {
+
+			if body.TTL < 0 || body.TTL > 86400 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "ttl must be between 1 and 86400"})
 				return
 			}
+			profile, err := svcCommon.GetPresentationProfile(c.Request.Context(), tenant, group, "verifier", "human")
+			if err != nil {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
+			clientID, err := svcCommon.ClientIDFromDID(profile.DID)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			origin, err := svcCommon.TenantOrigin(profile.Origin)
+			if err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			if body.TTL == 0 {
+				body.TTL = profile.RequestObjectTTLSeconds
+			}
 			requestID := uuid.NewString()
 			options := svcCommon.PresentationRequestOptions{TenantId: tenant, GroupId: group, RequestId: requestID, Ttl: body.TTL, ClientId: clientID}
-			policy, err := requestor.CreateFromPolicy(c.Request.Context(), tenant, group, body.PresentationPolicyID, options)
+			policy, err := requestor.CreateFromPolicy(c.Request.Context(), tenant, group, "human", body.PermissionSet, options)
 			if err != nil {
 				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 				return
@@ -65,7 +137,7 @@ func AddInternalRoutes(server *core.Server, requestor *services.PresentationRequ
 			}
 			requestURI := origin.String() + "/api/verifier/presentation/proof/" + url.PathEscape(state) + "/request-object/request.jwt"
 			link := "openid4vp://?" + url.Values{"request_uri": {requestURI}, "client_id": {clientID}}.Encode()
-			c.JSON(http.StatusCreated, gin.H{"presentationId": state, "requestId": requestID, "presentationPolicyId": policy.ID, "policyVersion": policy.Version, "authorizationUrl": link, "requestUri": requestURI, "ttl": body.TTL})
+			c.JSON(http.StatusCreated, gin.H{"presentationId": state, "requestId": requestID, "permissionSet": policy.ID, "authorizationUrl": link, "requestUri": requestURI, "ttl": body.TTL})
 		})
 
 		// Trusted internal verifier retrieval. Do not expose through external routes.

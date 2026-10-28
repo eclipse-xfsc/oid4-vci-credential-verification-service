@@ -68,8 +68,12 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	if object.ResponseMode != string(types.DirectPost) && object.ResponseMode != string(types.DirectPostJwt) {
 		return nil, fmt.Errorf("unsupported response_mode %q", object.ResponseMode)
 	}
-	if config.ExternalPresentation.RequestObjectPolicy != "" {
-		res, err := GetPolicyResult(object, config.ExternalPresentation.RequestObjectPolicy)
+	profile, profileErr := shared.GetPresentationProfile(ctx, tenantId, groupId, "holder", map[string]string{model.ConsentAuto: "machine", model.ConsentManual: "human"}[consentMode])
+	if profileErr != nil {
+		return nil, profileErr
+	}
+	if profile.RequestObjectPolicyURL != "" {
+		res, err := GetPolicyResult(object, profile.RequestObjectPolicyURL)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +165,7 @@ func ResolveAuthUrl(c *gin.Context, config *model.Config) (*url.URL, error) {
 			}
 		}
 	}
-	endpoint, resolveErr := shared.ResolveTenantEndpoint(c.GetHeader("X-ORIGIN"), config.ExternalPresentation.AuthorizeEndpoint)
+	endpoint, resolveErr := shared.ResolveTenantEndpoint(c.GetHeader("X-ORIGIN"), shared.HolderAuthorizePath)
 	if resolveErr != nil {
 		return nil, shared.ErrorResponse(c, "AuthorizeEndpoint could not be resolved", resolveErr)
 	}

@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "did": "did:web:demo-tenant.dccuitl.de",
+  "origin": "https://demo-tenant.dccuitl.de",
+  "keyNamespace": "ocm-wstack",
+  "keyId": "eckey",
+  "signingAlgorithm": "ES256",
+  "requestObjectPolicyUrl": "http://policy-service:8080/v1/data/xfsc/request_object/allow"
+}

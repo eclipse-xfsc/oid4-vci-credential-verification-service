@@ -26,18 +26,10 @@ type Config struct {
 		Table   string        `mapstructure:"table" envconfig:"TABLE" default:"verification_schema_migration"`
 		Timeout time.Duration `mapstructure:"timeout" envconfig:"TIMEOUT" default:"2m"`
 	} `mapstructure:"migrations" envconfig:"MIGRATIONS"`
-	PresentationPolicy struct {
-		URL            string `mapstructure:"url" envconfig:"URL"`
-		TimeoutSeconds int    `mapstructure:"timeoutSeconds" envconfig:"TIMEOUTSECONDS" default:"10"`
-	} `mapstructure:"presentationPolicy" envconfig:"PRESENTATIONPOLICY"`
-	RequestObjectSignKey string `mapstructure:"requestObjectSignKey" envconfig:"REQUESTOBJECTSIGNKEY"`
 	StateSigningKey      string `mapstructure:"stateSigningKey" envconfig:"STATESIGNINGKEY" json:"-"`
 	ExternalPresentation struct {
-		Enabled                   bool   `mapstructure:"enabled" envconfig:"ENABLED"`
-		AuthorizeEndpoint         string `mapstructure:"authorizeEndpoint" envconfig:"AUTHORIZEENDPOINT"`
-		RequestObjectPolicy       string `mapstructure:"requestObjectPolicy" envconfig:"REQUESTOBJECTPOLICY"`
-		ClientUrlSchema           string `mapstructure:"clientUrlSchema" envconfig:"CLIENTURLSCHEMA" default:"https"`
-		CredentialSelectionPolicy string `mapstructure:"credentialSelectionPolicy" envconfig:"CREDENTIALSELECTIONPOLICY"`
+		Enabled         bool   `mapstructure:"enabled" envconfig:"ENABLED"`
+		ClientUrlSchema string `mapstructure:"clientUrlSchema" envconfig:"CLIENTURLSCHEMA" default:"https"`
 	} `mapstructure:"externalpresentation" envconfig:"EXTERNALPRESENTATION"`
 	SignerService struct {
 		PresentationVerifyUrl  string `mapstructure:"presentationVerifyUrl" envconfig:"PRESENTATIONVERIFYURL"`

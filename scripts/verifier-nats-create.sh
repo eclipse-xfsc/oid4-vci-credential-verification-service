@@ -1,41 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if (( $# != 2 )); then
-  echo "Usage: $0 PRESENTATION_POLICY_ID PUBLIC_ORIGIN" >&2
-  echo "Example: $0 my-policy https://tenant.example.org" >&2
+if (( $# != 1 )); then
+  echo "Usage: $0 PERMISSION_SET" >&2
+  echo "Example: $0 mitgliedschaft" >&2
   exit 2
 fi
-POLICY_ID="$1"
-PUBLIC_ORIGIN="$2"
-if [[ ! "$PUBLIC_ORIGIN" =~ ^https://[^/?#]+/?$ ]]; then
-  echo "PUBLIC_ORIGIN must be an HTTPS origin without path, query or fragment" >&2
-  exit 2
-fi
-PUBLIC_ORIGIN="${PUBLIC_ORIGIN%/}"
-
+PERMISSION_SET="$1"
 NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 NATS_SUBJECT="${NATS_SUBJECT:-presentation.request}"
 TENANT_ID="${TENANT_ID:-demo_tenant}"
 GROUP_ID="${GROUP_ID:-test}"
-DID="${DID:?Set DID (e.g. did:web:tenant.example.org)}"
-if [[ ! "$DID" =~ ^did:[a-z0-9]+:.+ ]] || [[ "$DID" =~ [[:space:]\?\#] ]] || [[ "$DID" == *: ]]; then
-  echo "DID must be a valid DID" >&2
-  exit 2
-fi
-CLIENT_ID="decentralized_identifier:${DID}"
 REQUEST_ID="${REQUEST_ID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
 TTL="${TTL:-3600}"
 
-# Existing requestor.buildUri() expects scheme-less host + path for these fields.
-PUBLIC_HOST="${PUBLIC_ORIGIN#https://}"
-TARGET_URI="${PUBLIC_HOST}/api/verifier/presentation"
-REQUESTOBJECT_URI="${PUBLIC_HOST}/api/verifier/presentation/proof"
-
-EVENT="$(jq -n --arg policy "$POLICY_ID" --arg tenant "$TENANT_ID" --arg group "$GROUP_ID" \
-  --arg rid "$REQUEST_ID" --arg client "$CLIENT_ID" --arg target "$TARGET_URI" \
-  --arg requestobj "$REQUESTOBJECT_URI" --argjson ttl "$TTL" \
-  '{specversion:"1.0",id:$rid,source:"verifier-test",type:"verifier.presentation.authorization",datacontenttype:"application/json",data:{tenant_id:$tenant,group_id:$group,request_id:$rid,presentation_policy_id:$policy,client_id:$client,target_uri:$target,requestobject_uri:$requestobj,ttl:$ttl}}')"
+EVENT="$(jq -n --arg policy "$PERMISSION_SET" --arg tenant "$TENANT_ID" --arg group "$GROUP_ID" \
+  --arg rid "$REQUEST_ID" --argjson ttl "$TTL" \
+  '{specversion:"1.0",id:$rid,source:"verifier-test",type:"verifier.presentation.authorization",datacontenttype:"application/json",data:{tenant_id:$tenant,group_id:$group,request_id:$rid,permission_set:$policy,ttl:$ttl}}')"
 
 echo "$EVENT" | jq . >&2
 REPLY="$(nats req --server "$NATS_URL" --timeout "${NATS_TIMEOUT:-30s}" --raw "$NATS_SUBJECT" "$EVENT")"

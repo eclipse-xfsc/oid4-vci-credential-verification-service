@@ -80,9 +80,6 @@ config:
   servingPort: 8080
   country: DE
   region: EU
-  presentationPolicy:
-    url: "http://presentation-policy-service:8080"
-    timeoutSeconds: 10
   # HTTP base URL of Credential Storage in DIRECT mode. A future tenant service
   # will replace the static country/region lookup, not this client contract.
   storageServiceUrl: http://credential-storage-service.default.svc.cluster.local:8080
@@ -99,9 +96,6 @@ config:
 
   externalPresentation:
     enabled: true
-    authorizeEndpoint: /wallet/authorize
-    requestObjectPolicy: ""
-    credentialSelectionPolicy: ""
     clientUrlSchema: https
 
   signer:
@@ -122,3 +116,10 @@ config:
       url: nats://nats.nats.svc.cluster.local:4222
       queueGroup: credential-verification-service
       timeoutInSec: 10
+
+# Optional JWT authentication for presentation profile administration.
+profileAdminAuth:
+  scope: "presentation-profiles:write"
+  jwksUrl: "" # empty disables JWT middleware; protect routes at gateway
+  issuer: ""
+  audience: ""

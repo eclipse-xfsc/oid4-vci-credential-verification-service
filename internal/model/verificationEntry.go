@@ -7,6 +7,10 @@ import (
 )
 
 type VerificationEntry struct {
+	ProfileOrigin       string                         `json:"profileOrigin,omitempty"`
+	ProfileInteraction  string                         `json:"profileInteraction,omitempty"`
+	ProfileKeyNamespace string                         `json:"profileKeyNamespace,omitempty"`
+	ProfileKeyID        string                         `json:"profileKeyId,omitempty"`
 	Partition           string                         `json:"partition"`
 	TenantId            string                         `json:"tenantId"`
 	Region              string                         `json:"region"`

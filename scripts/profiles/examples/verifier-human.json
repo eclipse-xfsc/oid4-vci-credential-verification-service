@@ -1,0 +1,25 @@
+{
+  "enabled": true,
+  "did": "did:web:demo-tenant.dccuitl.de",
+  "origin": "https://demo-tenant.dccuitl.de",
+  "keyNamespace": "ocm-wstack",
+  "keyId": "eckey",
+  "signingAlgorithm": "ES256",
+  "responseMode": "direct_post",
+  "requestObjectTtlSeconds": 300,
+  "presentationPolicies": {
+    "mitgliedschaft": {
+      "credentials": [
+        {
+          "id": "membership",
+          "format": "dc+sd-jwt",
+          "meta": {
+            "vct_values": [
+              "https://example.org/credentials/MembershipCredential"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

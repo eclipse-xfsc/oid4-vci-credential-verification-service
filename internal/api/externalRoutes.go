@@ -132,7 +132,7 @@ func ResponseRequestObject(c *gin.Context, requestor *services.PresentationReque
 
 	path := strings.Replace(c.Request.RequestURI, "/"+id+"/request-object/request.jwt", "", -1)
 	if b && b2 {
-		JwtResponse(c, requestor, path, id, tenantId, c.Request.Header.Get("x-groupId"), c.Request.Header.Get("x-did"), config.RequestObjectSignKey, config.ExternalPresentation.ClientUrlSchema)
+		JwtResponse(c, requestor, path, id, tenantId, c.Request.Header.Get("x-groupId"), c.Request.Header.Get("x-did"), "", config.ExternalPresentation.ClientUrlSchema)
 
 	} else {
 		services.ErrorResponse(c, "Params not found.", http.ErrNotSupported)

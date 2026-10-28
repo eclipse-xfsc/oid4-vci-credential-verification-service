@@ -1,3 +1,73 @@
+# Presentation Profiles — current architecture
+
+The service resolves OID4VP configuration by `(tenant_id, group_id, profile_type, interaction_type)` from **`ocm.presentation_profiles`**. Verifier permission sets (for example `mitgliedschaft`) map directly to DCQL JSON inside `presentation_policies`; there is **no separate presentation-policy service**. HTTP authorizations select `verifier/human`, NATS selects `verifier/machine`. Profile UUIDs are internal and are not required by callers.
+
+```mermaid
+flowchart TD
+  A[Authorization: tenant + group + permissionSet] --> B{Transport}
+  B -->|HTTP| H[verifier / human]
+  B -->|NATS| M[verifier / machine]
+  H --> DB[(ocm.presentation_profiles)]
+  M --> DB
+  DB --> P[Resolve permissionSet to DCQL]
+  P --> S[Sign OID4VP Request Object using profile key]
+  S --> R[Return request_uri / authorization result]
+```
+
+```mermaid
+sequenceDiagram
+  participant Admin as Profile Administrator
+  participant API as Internal HTTP API
+  participant JWT as Optional JWT/JWKS middleware
+  participant DB as Cassandra
+  Admin->>API: GET list / GET one / PUT / DELETE
+  API->>JWT: Verify signature, expiry, tenant/group and scope
+  Note over JWT: Enabled when JWKS URL configured
+  JWT-->>API: Authorized
+  alt GET list
+    API->>DB: SELECT partition (tenant, group)
+    DB-->>API: Profiles including disabled
+  else GET one
+    API->>DB: SELECT profile key
+    DB-->>API: Profile including disabled
+  else PUT
+    API->>DB: Read existing profile and preserve UUID / createdAt
+    API->>DB: Upsert validated profile
+  else DELETE
+    API->>DB: DELETE exact profile key
+    API-->>Admin: 204 No Content
+  end
+```
+
+```mermaid
+flowchart LR
+  T[Tenant + Group] --> VH[Verifier human profile]
+  T --> VM[Verifier machine profile]
+  T --> HH[Holder human profile]
+  T --> HM[Holder machine profile]
+  VH --> DCQL1[permissionSet → DCQL]
+  VM --> DCQL2[permissionSet → DCQL]
+  HH --> POLICY1[Request Object Policy URL]
+  HM --> POLICY2[Request Object Policy URL]
+```
+
+## Administration
+
+- `GET /v1/tenants/{tenantId}/internal/presentation-profiles/{profileType}/{interactionType}` with `x-groupid` reads a profile, including disabled profiles.
+- `PUT` on the same route creates or updates it; updates retain `profileId` and `createdAt`, including for disabled profiles.
+- The JWT middleware is **off** when `CREDENTIALVERIFICATION_PROFILE_ADMIN_JWKS_URL` is empty. When set, it requires a signed bearer JWT with `exp`, matching `tenant_id` and `group_id`, and `presentation-profiles:write` scope (configurable). Set issuer and audience in production. JWKS is cached for five minutes.
+- Helm values: `profileAdminAuth.jwksUrl`, `.issuer`, `.audience`, `.scope`.
+- Example JSON payloads and shell scripts: [`scripts/profiles/README.md`](scripts/profiles/README.md).
+- `GET /v1/tenants/{tenantId}/internal/presentation-profiles` lists all four profile combinations for the `x-groupid` partition, including disabled profiles; returns `[]` if none exist.
+- `DELETE /v1/tenants/{tenantId}/internal/presentation-profiles/{profileType}/{interactionType}` deletes a profile; returns `204 No Content` (idempotent, including when absent).
+- **All four management methods** (`GET` single/list, `PUT`, `DELETE`) use the same optional JWT middleware and currently require the configured `presentation-profiles:write` scope even for reads. Restrict administrative routes at the network gateway when JWT is disabled.
+
+See [`docs/PRESENTATION_PROFILES.md`](docs/PRESENTATION_PROFILES.md) and [`docs/PROFILE_ADMIN_JWT.md`](docs/PROFILE_ADMIN_JWT.md).
+
+---
+
+> **Current profile-based configuration:** See [docs/PRESENTATION_PROFILES.md](docs/PRESENTATION_PROFILES.md). Older presentation-policy service examples below are superseded.
+
 # OID4VC Credential Verification Service
 
 ## Security hardening and production configuration (October 2026)

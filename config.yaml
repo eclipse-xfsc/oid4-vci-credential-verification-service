@@ -8,9 +8,6 @@ country: DE
 region: EU
 externalPresentation:
   enabled: true
-  authorizeEndpoint: http://localhost:8080
-  requestObjectPolicy: 
-  credentialSelectionPolicy: ""
 signerService:
   presentationVerifyUrl: http://localhost:9000/v1/presentation/verify
   presentationSignUrl: http://localhost:9000/v1/presentation/proof

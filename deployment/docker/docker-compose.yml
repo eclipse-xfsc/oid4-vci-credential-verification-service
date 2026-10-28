@@ -111,21 +111,6 @@ services:
     profiles: ["resolver"]
     ports: ["127.0.0.1:8134:8080"]
 
-  presentation-policy:
-    build:
-      context: ./demo-presentation-policy-service
-    environment:
-      HOST: "0.0.0.0"
-      PORT: "8080"
-    ports: ["127.0.0.1:8099:8080"]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2)"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 5s
-    restart: unless-stopped
-
   verification:
     build:
       context: ../..
@@ -135,7 +120,6 @@ services:
       nats: {condition: service_healthy}
       signer: {condition: service_started}
       storage: {condition: service_started}
-      presentation-policy: {condition: service_healthy}
     environment:
       CREDENTIALVERIFICATION_LISTEN_ADDR: 0.0.0.0
       CREDENTIALVERIFICATION_LISTEN_PORT: "8080"
@@ -160,29 +144,10 @@ services:
       CREDENTIALVERIFICATION_PRESENTATIONREQUEST: request
       CREDENTIALVERIFICATION_PROOFNOTIFY: presentation.proof.notify
       CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED: "true"
-      CREDENTIALVERIFICATION_EXTERNALPRESENTATION_AUTHORIZEENDPOINT: http://playground:8090/callback
       CREDENTIALVERIFICATION_EXTERNALPRESENTATION_CLIENTURLSCHEMA: http
-      CREDENTIALVERIFICATION_PUBLICBASEPATH: /presentation/proof
-      CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL: http://presentation-policy:8080
-      CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS: "10"
-      CREDENTIALVERIFICATION_REQUESTOBJECTSIGNKEY: ${VERIFICATION_REQUEST_OBJECT_SIGN_KEY:-test}
       CREDENTIALVERIFICATION_STATESIGNINGKEY: ${VERIFICATION_STATE_SIGNING_KEY:-local-dev-state-signing-key-change-me}
       DID_RESOLVER: ${DID_RESOLVER:-http://resolver:8080/1.0/identifiers/}
     ports: ["127.0.0.1:8086:8080"]
-
-  # playground:
-  #   build: ./playground
-  #   depends_on:
-  #     nats: {condition: service_healthy}
-  #     verification: {condition: service_started}
-  #   environment:
-  #     NATS_URL: nats://nats:4222
-  #     VERIFICATION_URL: http://verification:8080
-  #     PUBLIC_VERIFICATION_URL: http://localhost:8086
-  #     PUBLIC_PLAYGROUND_URL: http://localhost:8090
-  #     NATS_AUTHORIZATION_SUBJECT: presentation.authorisation
-  #     NATS_PRESENTATION_SUBJECT: request
-  #   ports: ["127.0.0.1:8090:8090"]
 
 volumes:
   cassandra-data:

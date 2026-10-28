@@ -109,11 +109,16 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 	row, err := common.GetEntryFromDb(ctx, tenantId, id)
 
 	if err == nil {
+		if row.GroupId != groupId {
+			return nil, errors.New("group mismatch for request object")
+		}
+		if row.ProfileKeyNamespace == "" || row.ProfileKeyID == "" {
+			return nil, errors.New("missing signer snapshot in authorization state")
+		}
 
-		clientUrl := url.URL{
-			Scheme: schema,
-			Host:   host,
-			Path:   path + "/" + id,
+		clientUrl, err := url.Parse(row.ProfileOrigin + common.VerifierRequestObjectPath + "/" + url.PathEscape(id))
+		if err != nil {
+			return nil, err
 		}
 
 		authRequest := presentation.AuthorizationRequest{
@@ -139,8 +144,8 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 				TenantId:  tenantId,
 				RequestId: uuid.NewString(),
 			},
-			Namespace: tenantId,
-			Key:       requestor.config.RequestObjectSignKey,
+			Namespace: row.ProfileKeyNamespace,
+			Key:       row.ProfileKeyID,
 			Payload:   pb,
 		}
 
@@ -223,12 +228,8 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 			return nil, errors.New("problem during marshaling")
 		}
 
-		if authorizationRequest.PresentationPolicyID == "" {
-			return requestor.AuthorizationReplyError(reply, errors.New("presentation_policy_id required"), "invalid authorization")
-		}
-
-		if _, err = presentation.ParseClientIdentifier(authorizationRequest.ClientID); err != nil {
-			return requestor.AuthorizationReplyError(reply, err, "invalid client_id")
+		if authorizationRequest.PermissionSet == "" {
+			return requestor.AuthorizationReplyError(reply, errors.New("permission_set required"), "invalid authorization")
 		}
 
 		state, err := common.EncodeVerificationState(authorizationRequest.GroupId, authorizationRequest.RequestId)
@@ -237,21 +238,26 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 		}
 
 		reply.PresentationId = state // compatibility: this field now carries the opaque verification state
-		reply.RequestUri, err = requestor.buildUri(authorizationRequest, state)
+		profile, profileErr := common.GetPresentationProfile(ctx, authorizationRequest.TenantId, authorizationRequest.GroupId, "verifier", "machine")
+		if profileErr != nil {
+			return requestor.AuthorizationReplyError(reply, profileErr, "profile lookup failed")
+		}
+		clientID := "decentralized_identifier:" + profile.DID
+		reply.RequestUri, err = requestor.buildUri(profile.Origin, clientID, state)
 
 		requestOptions := common.PresentationRequestOptions{
 			TenantId:  authorizationRequest.TenantId,
 			RequestId: authorizationRequest.RequestId,
 			GroupId:   authorizationRequest.GroupId,
 			Ttl:       authorizationRequest.Ttl,
-			ClientId:  authorizationRequest.ClientID,
+			ClientId:  clientID,
 		}
 
 		if err != nil {
 			return requestor.AuthorizationReplyError(reply, err, "error during build uri")
 		}
 
-		_, err = requestor.CreateFromPolicy(ctx, authorizationRequest.TenantId, authorizationRequest.GroupId, authorizationRequest.PresentationPolicyID, requestOptions)
+		_, err = requestor.CreateFromPolicy(ctx, authorizationRequest.TenantId, authorizationRequest.GroupId, "machine", authorizationRequest.PermissionSet, requestOptions)
 
 		if err != nil {
 			return requestor.AuthorizationReplyError(reply, err, "error during db adding")
@@ -274,10 +280,18 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 }
 
 // CreateFromPolicy is shared by internal HTTP and NATS entrypoints.
-func (requestor *PresentationRequestor) CreateFromPolicy(ctx context.Context, tenant, group, policyID string, options common.PresentationRequestOptions) (*PresentationPolicy, error) {
-	policy, err := ResolvePresentationPolicy(ctx, requestor.config, tenant, group, policyID)
+func (requestor *PresentationRequestor) CreateFromPolicy(ctx context.Context, tenant, group, interaction, permissionSet string, options common.PresentationRequestOptions) (*PresentationPolicy, error) {
+	policy, profile, err := ResolvePresentationPolicy(ctx, tenant, group, interaction, permissionSet)
 	if err != nil {
 		return nil, err
+	}
+	options.ClientId = "decentralized_identifier:" + profile.DID
+	options.ProfileOrigin = profile.Origin
+	options.ProfileInteraction = interaction
+	options.ProfileKeyNamespace = profile.KeyNamespace
+	options.ProfileKeyID = profile.KeyID
+	if options.Ttl == 0 {
+		options.Ttl = profile.RequestObjectTTLSeconds
 	}
 	if err = requestor.CreatePresentationRequest(policy.DCQLQuery, options, ctx); err != nil {
 		return nil, err
@@ -331,38 +345,14 @@ func (requestor *PresentationRequestor) Alive() bool {
 	return requestor.client.Alive()
 }
 
-func (requestor *PresentationRequestor) buildUri(
-	request messaging.PresentationAuthorizationCreationRequest,
-	id string,
-) (string, error) {
-
-	scheme := requestor.config.ExternalPresentation.ClientUrlSchema
-
-	requestObjectURL, err := url.Parse(
-		scheme + "://" + request.RequestObjectUri,
-	)
-	if err != nil {
-		return "", fmt.Errorf("invalid request object URI: %w", err)
+func (requestor *PresentationRequestor) buildUri(origin, clientID, id string) (string, error) {
+	base, err := url.Parse(origin)
+	if err != nil || base.Scheme != "https" || base.Host == "" {
+		return "", errors.New("invalid profile origin")
 	}
-
-	requestObjectURL.Path = strings.TrimRight(requestObjectURL.Path, "/") +
-		"/" + id + "/request-object/request.jwt"
-
-	targetURL, err := url.Parse(
-		scheme + "://" + request.TargetUri,
-	)
-	if err != nil {
-		return "", fmt.Errorf("invalid target URI: %w", err)
-	}
-
-	targetURL.Path = strings.TrimRight(targetURL.Path, "/") + "/authorize"
-
-	query := targetURL.Query()
-	query.Set("client_id", request.ClientID)
-	query.Set("request_uri", requestObjectURL.String())
-	targetURL.RawQuery = query.Encode()
-
-	return targetURL.String(), nil
+	requestURI := origin + common.VerifierRequestObjectPath + "/" + url.PathEscape(id) + "/request-object/request.jwt"
+	q := url.Values{"client_id": {clientID}, "request_uri": {requestURI}}
+	return "openid4vp://?" + q.Encode(), nil
 }
 
 func (requestor *PresentationRequestor) publishStatus(tenantId string, requestId string, presentationId string, status string) {
