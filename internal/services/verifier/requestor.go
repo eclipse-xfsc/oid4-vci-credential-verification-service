@@ -106,11 +106,19 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 
 func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx context.Context, schema, host, path string, id string, tenantId, groupId, did, key string) ([]byte, error) {
 
+	// The request-object endpoint is called by external wallets, which do not
+	// send XFSC-specific x-groupId headers. Derive the group exclusively from
+	// the cryptographically verified state token.
+	state, err := common.DecodeVerificationState(id)
+	if err != nil {
+		return nil, fmt.Errorf("invalid request object state: %w", err)
+	}
+
 	row, err := common.GetEntryFromDb(ctx, tenantId, id)
 
 	if err == nil {
-		if row.GroupId != groupId {
-			return nil, errors.New("group mismatch for request object")
+		if row.GroupId != state.GroupId || row.RequestId != state.RequestId {
+			return nil, errors.New("request object state does not match stored authorization")
 		}
 		if row.ProfileKeyNamespace == "" || row.ProfileKeyID == "" {
 			return nil, errors.New("missing signer snapshot in authorization state")
