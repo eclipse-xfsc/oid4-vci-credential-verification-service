@@ -108,10 +108,12 @@ func GetPresentationProfileForAdmin(ctx context.Context, tenant, group, kind, in
 		return nil, errors.New("invalid profile key")
 	}
 	p := &PresentationProfile{TenantID: tenant, GroupID: group, ProfileType: kind, InteractionType: interaction}
-	err := app.GetEnvironment().GetSession().Query(`SELECT profile_id,enabled,did,origin,key_namespace,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at FROM ocm.presentation_profiles WHERE tenant_id=? AND group_id=? AND profile_type=? AND interaction_type=?`, tenant, group, kind, interaction).WithContext(ctx).Consistency(gocql.LocalQuorum).Scan(&p.ProfileID, &p.Enabled, &p.DID, &p.Origin, &p.KeyNamespace, &p.KeyID, &p.SigningAlgorithm, &p.ResponseMode, &p.RequestObjectTTLSeconds, &p.RequestObjectPolicyURL, &p.CredentialSelectionPolicyURL, &p.PresentationPolicies, &p.CreatedAt, &p.UpdatedAt)
+	var dbProfileID gocql.UUID
+	err := app.GetEnvironment().GetSession().Query(`SELECT profile_id,enabled,did,origin,key_namespace,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at FROM ocm.presentation_profiles WHERE tenant_id=? AND group_id=? AND profile_type=? AND interaction_type=?`, tenant, group, kind, interaction).WithContext(ctx).Consistency(gocql.LocalQuorum).Scan(&dbProfileID, &p.Enabled, &p.DID, &p.Origin, &p.KeyNamespace, &p.KeyID, &p.SigningAlgorithm, &p.ResponseMode, &p.RequestObjectTTLSeconds, &p.RequestObjectPolicyURL, &p.CredentialSelectionPolicyURL, &p.PresentationPolicies, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("load presentation profile: %w", err)
 	}
+	p.ProfileID = uuid.UUID(dbProfileID)
 	return p, nil
 }
 
@@ -123,7 +125,7 @@ func SavePresentationProfile(ctx context.Context, p *PresentationProfile) error 
 		p.CreatedAt = time.Now().UTC()
 	}
 	p.UpdatedAt = time.Now().UTC()
-	return app.GetEnvironment().GetSession().Query(`INSERT INTO ocm.presentation_profiles (tenant_id,group_id,profile_type,interaction_type,profile_id,enabled,did,origin,key_namespace,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.TenantID, p.GroupID, p.ProfileType, p.InteractionType, p.ProfileID, p.Enabled, p.DID, p.Origin, p.KeyNamespace, p.KeyID, p.SigningAlgorithm, p.ResponseMode, p.RequestObjectTTLSeconds, p.RequestObjectPolicyURL, p.CredentialSelectionPolicyURL, p.PresentationPolicies, p.CreatedAt, p.UpdatedAt).WithContext(ctx).Exec()
+	return app.GetEnvironment().GetSession().Query(`INSERT INTO ocm.presentation_profiles (tenant_id,group_id,profile_type,interaction_type,profile_id,enabled,did,origin,key_namespace,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.TenantID, p.GroupID, p.ProfileType, p.InteractionType, gocql.UUID(p.ProfileID), p.Enabled, p.DID, p.Origin, p.KeyNamespace, p.KeyID, p.SigningAlgorithm, p.ResponseMode, p.RequestObjectTTLSeconds, p.RequestObjectPolicyURL, p.CredentialSelectionPolicyURL, p.PresentationPolicies, p.CreatedAt, p.UpdatedAt).WithContext(ctx).Exec()
 }
 
 // ListPresentationProfilesForAdmin lists all profiles within a tenant/group partition,
@@ -136,9 +138,11 @@ func ListPresentationProfilesForAdmin(ctx context.Context, tenant, group string)
 	profiles := make([]PresentationProfile, 0)
 	for {
 		profile := PresentationProfile{TenantID: tenant, GroupID: group}
-		if !iter.Scan(&profile.ProfileType, &profile.InteractionType, &profile.ProfileID, &profile.Enabled, &profile.DID, &profile.Origin, &profile.KeyNamespace, &profile.KeyID, &profile.SigningAlgorithm, &profile.ResponseMode, &profile.RequestObjectTTLSeconds, &profile.RequestObjectPolicyURL, &profile.CredentialSelectionPolicyURL, &profile.PresentationPolicies, &profile.CreatedAt, &profile.UpdatedAt) {
+		var dbProfileID gocql.UUID
+		if !iter.Scan(&profile.ProfileType, &profile.InteractionType, &dbProfileID, &profile.Enabled, &profile.DID, &profile.Origin, &profile.KeyNamespace, &profile.KeyID, &profile.SigningAlgorithm, &profile.ResponseMode, &profile.RequestObjectTTLSeconds, &profile.RequestObjectPolicyURL, &profile.CredentialSelectionPolicyURL, &profile.PresentationPolicies, &profile.CreatedAt, &profile.UpdatedAt) {
 			break
 		}
+		profile.ProfileID = uuid.UUID(dbProfileID)
 		profiles = append(profiles, profile)
 	}
 	if err := iter.Close(); err != nil {
