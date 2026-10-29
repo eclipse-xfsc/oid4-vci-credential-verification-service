@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/eclipse-xfsc/oid4-vci-vp-library/model/presentation"
 
 	app "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/common"
 	"github.com/gocql/gocql"
@@ -19,24 +20,24 @@ const HolderAuthorizePath = "/api/holder/authorize"
 const VerifierRequestObjectPath = "/api/verifier/presentation/proof"
 
 type PresentationProfile struct {
-	TenantID                     string            `json:"tenantId"`
-	GroupID                      string            `json:"groupId"`
-	ProfileType                  string            `json:"profileType"`
-	InteractionType              string            `json:"interactionType"`
-	ProfileID                    uuid.UUID         `json:"profileId"`
-	Enabled                      bool              `json:"enabled"`
-	DID                          string            `json:"did"`
-	Origin                       string            `json:"origin"`
-	KeyNamespace                 string            `json:"keyNamespace"`
-	KeyID                        string            `json:"keyId"`
-	SigningAlgorithm             string            `json:"signingAlgorithm"`
-	ResponseMode                 string            `json:"responseMode"`
-	RequestObjectTTLSeconds      int               `json:"requestObjectTtlSeconds"`
-	RequestObjectPolicyURL       string            `json:"requestObjectPolicyUrl"`
-	CredentialSelectionPolicyURL string            `json:"credentialSelectionPolicyUrl"`
-	PresentationPolicies         map[string]string `json:"presentationPolicies"`
-	CreatedAt                    time.Time         `json:"createdAt"`
-	UpdatedAt                    time.Time         `json:"updatedAt"`
+	TenantID                     string                     `json:"tenantId"`
+	GroupID                      string                     `json:"groupId"`
+	ProfileType                  string                     `json:"profileType"`
+	InteractionType              string                     `json:"interactionType"`
+	ProfileID                    uuid.UUID                  `json:"profileId"`
+	Enabled                      bool                       `json:"enabled"`
+	DID                          string                     `json:"did"`
+	Origin                       string                     `json:"origin"`
+	KeyNamespace                 string                     `json:"keyNamespace"`
+	KeyID                        string                     `json:"keyId"`
+	SigningAlgorithm             string                     `json:"signingAlgorithm"`
+	ResponseMode                 string                     `json:"responseMode"`
+	RequestObjectTTLSeconds      int                        `json:"requestObjectTtlSeconds"`
+	RequestObjectPolicyURL       string                     `json:"requestObjectPolicyUrl"`
+	CredentialSelectionPolicyURL string                     `json:"credentialSelectionPolicyUrl"`
+	PresentationPolicies         map[string]json.RawMessage `json:"presentationPolicies"`
+	CreatedAt                    time.Time                  `json:"createdAt"`
+	UpdatedAt                    time.Time                  `json:"updatedAt"`
 }
 
 func ValidProfileType(v string) bool     { return v == "verifier" || v == "holder" }

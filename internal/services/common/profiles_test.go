@@ -1,13 +1,45 @@
 package common
 
 import (
-	"github.com/google/uuid"
+	"encoding/json"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func validTestProfile() *PresentationProfile {
-	return &PresentationProfile{TenantID: "x", GroupID: "y", ProfileType: "verifier", InteractionType: "human", ProfileID: uuid.New(), Enabled: true, DID: "did:web:example.org", Origin: "https://example.org", KeyNamespace: "tenant", KeyID: "key", SigningAlgorithm: "ES256", ResponseMode: "direct_post", RequestObjectTTLSeconds: 300, PresentationPolicies: map[string]string{"mitgliedschaft": `{"credentials":[{"id":"membership","format":"dc+sd-jwt","meta":{"vct_values":["https://example.org/MembershipCredential"]}}]}`}}
+	return &PresentationProfile{
+		TenantID:                "x",
+		GroupID:                 "y",
+		ProfileType:             "verifier",
+		InteractionType:         "human",
+		ProfileID:               uuid.New(),
+		Enabled:                 true,
+		DID:                     "did:web:example.org",
+		Origin:                  "https://example.org",
+		KeyNamespace:            "tenant",
+		KeyID:                   "key",
+		SigningAlgorithm:        "ES256",
+		ResponseMode:            "direct_post",
+		RequestObjectTTLSeconds: 300,
+		PresentationPolicies: map[string]json.RawMessage{
+			"mitgliedschaft": json.RawMessage(`{
+				"credentials": [
+					{
+						"id": "membership",
+						"format": "dc+sd-jwt",
+						"meta": {
+							"vct_values": [
+								"https://example.org/MembershipCredential"
+							]
+						}
+					}
+				]
+			}`),
+		},
+	}
 }
+
 func TestProfileValidation(t *testing.T) {
 	p := validTestProfile()
 	if err := ValidateProfile(p); err != nil {
