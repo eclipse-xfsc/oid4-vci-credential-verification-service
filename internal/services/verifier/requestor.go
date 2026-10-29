@@ -317,6 +317,7 @@ func (requestor *PresentationRequestor) CreateFromPolicy(ctx context.Context, te
 	options.ProfileOrigin = profile.Origin
 	options.ProfileInteraction = interaction
 	options.ProfileKeyNamespace = profile.KeyNamespace
+	options.ProfileKeyGroup = profile.KeyGroup
 	options.ProfileKeyID = profile.KeyID
 	if options.Ttl == 0 {
 		options.Ttl = profile.RequestObjectTTLSeconds
