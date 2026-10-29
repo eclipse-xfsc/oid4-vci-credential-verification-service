@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -114,6 +115,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 		return nil, fmt.Errorf("invalid request object state: %w", err)
 	}
 
+	requestor.logger.Info("OID4VP request object requested", "tenantId", tenantId, "groupId", state.GroupId, "requestId", state.RequestId)
 	row, err := common.GetEntryFromDb(ctx, tenantId, id)
 
 	if err == nil {
@@ -138,6 +140,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			ResponseMode: "direct_post",
 			DCQLQuery:    &row.DCQLQuery,
 		}
+		requestor.logger.Info("OID4VP authorization request prepared", "tenantId", tenantId, "groupId", state.GroupId, "requestId", state.RequestId, "clientId", authRequest.ClientID, "responseUri", authRequest.ResponseURI, "responseMode", authRequest.ResponseMode, "responseType", authRequest.ResponseType)
 		if err := authRequest.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid OID4VP authorization request: %w", err)
 		}
@@ -145,6 +148,12 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 		pb, err := json.Marshal(authRequest)
 		if err != nil {
 			return nil, err
+		}
+
+		// Explicit opt-in: this logs the full authorization request including nonce, state and DCQL.
+		// Enable only temporarily in a protected development environment.
+		if os.Getenv("OID4VP_DEBUG_REQUEST_OBJECT") == "true" {
+			requestor.logger.Info("OID4VP DEBUG unsigned request object payload", "payload", string(pb))
 		}
 
 		var req = msg.CreateTokenRequest{
@@ -169,6 +178,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			return nil, err
 		}
 
+		requestor.logger.Info("OID4VP sending signing request", "tenantId", tenantId, "requestId", state.RequestId, "namespace", row.ProfileKeyNamespace, "keyId", row.ProfileKeyID)
 		res, err := requestor.signerClient.RequestCtx(ctx, ev)
 
 		if err != nil {
@@ -181,6 +191,11 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 
 		if err != nil {
 			return nil, err
+		}
+
+		requestor.logger.Info("OID4VP signer replied", "tenantId", tenantId, "requestId", state.RequestId, "tokenBytes", len(rep.Token))
+		if os.Getenv("OID4VP_DEBUG_REQUEST_OBJECT") == "true" {
+			requestor.logger.Info("OID4VP DEBUG signed request object JWT", "jwt", string(rep.Token))
 		}
 
 		err = common.UpdateDbStatus(ctx, tenantId, string(model.PresentationRequestObjectFetched), id)
