@@ -10,6 +10,7 @@ type VerificationEntry struct {
 	ProfileOrigin       string                         `json:"profileOrigin,omitempty"`
 	ProfileInteraction  string                         `json:"profileInteraction,omitempty"`
 	ProfileKeyNamespace string                         `json:"profileKeyNamespace,omitempty"`
+	ProfileKeyGroup     string                         `json:"profileKeyGroup,omitempty"`
 	ProfileKeyID        string                         `json:"profileKeyId,omitempty"`
 	Partition           string                         `json:"partition"`
 	TenantId            string                         `json:"tenantId"`

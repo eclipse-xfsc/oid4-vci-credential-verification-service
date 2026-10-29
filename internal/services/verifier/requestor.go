@@ -159,9 +159,11 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 		var req = msg.CreateTokenRequest{
 			Request: commonMessageTypes.Request{
 				TenantId:  tenantId,
+				GroupId:   groupId,
 				RequestId: uuid.NewString(),
 			},
 			Namespace: row.ProfileKeyNamespace,
+			Group:     row.ProfileKeyGroup,
 			Key:       row.ProfileKeyID,
 			Payload:   pb,
 		}
