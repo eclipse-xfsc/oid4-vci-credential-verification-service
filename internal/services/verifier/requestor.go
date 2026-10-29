@@ -194,9 +194,6 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 		}
 
 		requestor.logger.Info("OID4VP signer replied", "tenantId", tenantId, "requestId", state.RequestId, "tokenBytes", len(rep.Token))
-		if os.Getenv("OID4VP_DEBUG_REQUEST_OBJECT") == "true" {
-			requestor.logger.Info("OID4VP DEBUG signed request object JWT", "jwt", string(rep.Token))
-		}
 
 		err = common.UpdateDbStatus(ctx, tenantId, string(model.PresentationRequestObjectFetched), id)
 
@@ -204,6 +201,12 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			return nil, err
 		}
 
+		// Log the exact JWT bytes returned to the HTTP handler on GET.
+		// The full JWT is sensitive: enable only for short-lived debugging.
+		requestor.logger.Info("OID4VP request.jwt returned to GET handler", "tenantId", tenantId, "requestId", state.RequestId, "bytes", len(rep.Token))
+		if os.Getenv("OID4VP_DEBUG_REQUEST_OBJECT") == "true" {
+			requestor.logger.Info("OID4VP DEBUG GET request.jwt response", "jwt", string(rep.Token))
+		}
 		return rep.Token, nil
 	}
 	return nil, err
