@@ -138,6 +138,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			State:        id,
 			ResponseMode: "direct_post",
 			DCQLQuery:    &row.DCQLQuery,
+			Expiration:   time.Now().Add(15 * time.Minute).Unix(),
 		}
 		requestor.logger.Info("OID4VP authorization request prepared", "tenantId", tenantId, "groupId", state.GroupId, "requestId", state.RequestId, "responseMode", authRequest.ResponseMode, "responseType", authRequest.ResponseType)
 		if err := authRequest.Validate(); err != nil {
