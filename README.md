@@ -1274,8 +1274,8 @@ Für LDP VC muss `format` auf `ldp_vc` gesetzt und die DCQL-Query auf die tatsä
 
 ```bash
 export API_BASE=http://127.0.0.1:8080
-export PUBLIC_BASE=https://verifier.example/v1/tenants/demo_tenant
-export TENANT_ID=demo_tenant GROUP_ID=test
+export PUBLIC_BASE=https://verifier.example/v1/tenants/demo-tenant
+export TENANT_ID=demo-tenant GROUP_ID=test
 export CLIENT_ID='decentralized_identifier:did:web:verifier.example'
 export SIGN_KEY=verifier-key
 ./scripts/verifier-http-create.sh dcql.json
@@ -1312,7 +1312,7 @@ export NATS_SUBJECT='request'
 export NATS_TIMEOUT='30s'
 
 # Tenant
-export TENANT_ID='demo_tenant'
+export TENANT_ID='demo-tenant'
 export GROUP_ID='test'
 
 # Verifier-Identität
@@ -1358,7 +1358,7 @@ Beispiele:
 
 ```bash
 export API_BASE=http://127.0.0.1:8080
-export TENANT_ID=demo_tenant
+export TENANT_ID=demo-tenant
 export GROUP_ID=test
 ./scripts/verifier-http-list.sh
 ./scripts/verifier-http-get.sh "$(cat verifier-output/presentation_id.txt)"
@@ -1379,7 +1379,7 @@ Die bisherigen `test-policy-service/`-Fixtures liegen jetzt unter [`deployment/d
 ```bash
 cd deployment/docker
 docker compose up -d --build
-curl -fsS 'http://127.0.0.1:8099/v1/presentation-policies/paradym-test?tenantId=demo_tenant&groupId=test' | jq .
+curl -fsS 'http://127.0.0.1:8099/v1/presentation-policies/paradym-test?tenantId=demo-tenant&groupId=test' | jq .
 ```
 
 Im globalen Compose wird `presentation-policy` automatisch gebaut und als gesunde Abhängigkeit des Verifiers gestartet. Die Verifier-Konfiguration verwendet `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL=http://presentation-policy:8080` und `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS=10`; der Request-Object-Schlüssel wird über `VERIFICATION_REQUEST_OBJECT_SIGN_KEY` konfiguriert (Default nur für lokale Tests). Der Test-Service ist am Host ausschließlich über `127.0.0.1:8099` erreichbar. **Nicht öffentlich freigeben:** Tenant/Group werden nur auf Vorhandensein geprüft.

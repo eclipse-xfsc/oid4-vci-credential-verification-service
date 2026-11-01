@@ -4,7 +4,7 @@ The implemented routes are **GET** and **PUT** (upsert); DELETE and list are not
 
 ```bash
 export BASE_URL=http://localhost:8080
-export TENANT_ID=demo_tenant GROUP_ID=group1
+export TENANT_ID=demo-tenant GROUP_ID=group1
 export PROFILE_TYPE=verifier INTERACTION_TYPE=human
 export PROFILE_FILE=scripts/profiles/examples/verifier-human.json
 # With JWKS enabled, set JWT to a token with tenant_id, group_id and presentation-profiles:write scope.
@@ -50,7 +50,7 @@ sequenceDiagram
 ### CLI smoke tests
 
 ```bash
-export BASE_URL=http://localhost:8080 TENANT_ID=demo_tenant GROUP_ID=group1
+export BASE_URL=http://localhost:8080 TENANT_ID=demo-tenant GROUP_ID=group1
 export JWT="<access-token>" # omit only when JWT protection is disabled
 ./scripts/profiles/list-profiles.sh
 export PROFILE_TYPE=verifier INTERACTION_TYPE=human

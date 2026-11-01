@@ -4,7 +4,7 @@ set -euo pipefail
 # Test-/Demo-Client: approves automatically with the first credential of the first nonempty DCQL group.
 # Usage: ./manual-consent.sh '<openid4vp://...>' '<holderDid>' '<signKey>' '[disclosure1,disclosure2]'
 API_BASE="${API_BASE:-http://127.0.0.1:8080}"
-TENANT_ID="${TENANT_ID:-demo_tenant}"
+TENANT_ID="${TENANT_ID:-demo-tenant}"
 GROUP_ID="${GROUP_ID:-test}"
 NAMESPACE="${NAMESPACE:-ocm-wstack}"
 KEY_GROUP="${KEY_GROUP:-demo-tenant}"

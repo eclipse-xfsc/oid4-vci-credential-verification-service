@@ -4,7 +4,7 @@ set -euo pipefail
 NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 NATS_SUBJECT="${NATS_SUBJECT:-presentation.authorisation}"
 NATS_TIMEOUT="${NATS_TIMEOUT:-130s}"
-TENANT_ID="${TENANT_ID:-demo_tenant}"
+TENANT_ID="${TENANT_ID:-demo-tenant}"
 GROUP_ID="${GROUP_ID:-test}"
 NAMESPACE="${NAMESPACE:-ocm-wstack}"
 KEY_GROUP="${KEY_GROUP:-demo-tenant}"

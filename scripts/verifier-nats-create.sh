@@ -9,7 +9,7 @@ fi
 PERMISSION_SET="$1"
 NATS_URL="${NATS_URL:-nats://127.0.0.1:4222}"
 NATS_SUBJECT="${NATS_SUBJECT:-presentation.request}"
-TENANT_ID="${TENANT_ID:-demo_tenant}"
+TENANT_ID="${TENANT_ID:-demo-tenant}"
 GROUP_ID="${GROUP_ID:-test}"
 REQUEST_ID="${REQUEST_ID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}"
 TTL="${TTL:-3600}"

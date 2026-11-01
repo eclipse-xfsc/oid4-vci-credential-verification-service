@@ -8,7 +8,7 @@ if (( $# != 1 )); then
 fi
 PERMISSION_SET="$1"
 API_BASE="${API_BASE:-http://127.0.0.1:8080}"
-TENANT_ID="${TENANT_ID:-demo_tenant}"
+TENANT_ID="${TENANT_ID:-demo-tenant}"
 GROUP_ID="${GROUP_ID:-test}"
 TTL="${TTL:-3600}"
 OUT="${OUTPUT_DIR:-./verifier-output}"

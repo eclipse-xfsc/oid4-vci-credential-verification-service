@@ -45,7 +45,7 @@ sequenceDiagram
 ### CLI smoke tests
 
 ```bash
-export BASE_URL=http://localhost:8080 TENANT_ID=demo_tenant GROUP_ID=group1
+export BASE_URL=http://localhost:8080 TENANT_ID=demo-tenant GROUP_ID=group1
 export JWT="<access-token>" # omit only when JWT protection is disabled
 ./scripts/profiles/list-profiles.sh
 export PROFILE_TYPE=verifier INTERACTION_TYPE=human

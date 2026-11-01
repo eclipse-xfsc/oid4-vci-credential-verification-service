@@ -246,6 +246,7 @@ func (requestor *PresentationRequestor) reply(ctx context.Context, event event.E
 		reply := messaging.PresentationAuthorizationCreationReply{
 			BaseReply: commonMessageTypes.Reply{
 				TenantId:  authorizationRequest.TenantId,
+				GroupId:   authorizationRequest.GroupId,
 				RequestId: authorizationRequest.RequestId,
 			},
 		}
@@ -384,11 +385,12 @@ func (requestor *PresentationRequestor) buildUri(origin, clientID, id string) (s
 	return "openid4vp://?" + q.Encode(), nil
 }
 
-func (requestor *PresentationRequestor) publishStatus(tenantId string, requestId string, presentationId string, status string) {
+func (requestor *PresentationRequestor) publishStatus(tenantId, groupId string, requestId string, presentationId string, status string) {
 
 	msg := messaging.ProofNotifyEvent{
 		Reply: commonMessageTypes.Reply{
 			TenantId:  tenantId,
+			GroupId:   groupId,
 			RequestId: requestId,
 		},
 		PresentationId: presentationId,

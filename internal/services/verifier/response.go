@@ -8,11 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
 
 	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	storageMessaging "github.com/eclipse-xfsc/credential-storage-service/pkg/messaging"
@@ -155,7 +156,7 @@ func (requestor *PresentationRequestor) CheckPresentations(ctx context.Context, 
 		return err
 	}
 	requestor.forwardPresentation(tenantID, row.RequestId, row.GroupId, encoded)
-	requestor.publishStatus(tenantID, row.RequestId, id, string(model.PresentationReceived))
+	requestor.publishStatus(tenantID, row.GroupId, row.RequestId, id, string(model.PresentationReceived))
 	return nil
 }
 
