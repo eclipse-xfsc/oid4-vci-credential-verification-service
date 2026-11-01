@@ -18,6 +18,7 @@ func validTestProfile() *PresentationProfile {
 		DID:                     "did:web:example.org",
 		Origin:                  "https://example.org",
 		KeyNamespace:            "tenant",
+		KeyGroup:                "crypto-group",
 		KeyID:                   "key",
 		SigningAlgorithm:        "ES256",
 		ResponseMode:            "direct_post",

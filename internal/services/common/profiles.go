@@ -107,9 +107,11 @@ func GetPresentationProfileForAdmin(ctx context.Context, tenant, group, kind, in
 	if tenant == "" || group == "" || !ValidProfileType(kind) || !ValidInteractionType(interaction) {
 		return nil, errors.New("invalid profile key")
 	}
+	LogRouting("profile.read", tenant, group, "", "", "", "", false)
 	p := &PresentationProfile{TenantID: tenant, GroupID: group, ProfileType: kind, InteractionType: interaction}
 	var dbProfileID gocql.UUID
 	err := app.GetEnvironment().GetSession().Query(`SELECT profile_id,enabled,did,origin,key_namespace,key_group,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at FROM ocm.presentation_profiles WHERE tenant_id=? AND group_id=? AND profile_type=? AND interaction_type=?`, tenant, group, kind, interaction).WithContext(ctx).Consistency(gocql.LocalQuorum).Scan(&dbProfileID, &p.Enabled, &p.DID, &p.Origin, &p.KeyNamespace, &p.KeyGroup, &p.KeyID, &p.SigningAlgorithm, &p.ResponseMode, &p.RequestObjectTTLSeconds, &p.RequestObjectPolicyURL, &p.CredentialSelectionPolicyURL, &p.PresentationPolicies, &p.CreatedAt, &p.UpdatedAt)
+	LogRouting("profile.read_result", tenant, group, "", p.KeyNamespace, p.KeyGroup, p.KeyID, err != nil)
 	if err != nil {
 		return nil, fmt.Errorf("load presentation profile: %w", err)
 	}
@@ -125,7 +127,10 @@ func SavePresentationProfile(ctx context.Context, p *PresentationProfile) error 
 		p.CreatedAt = time.Now().UTC()
 	}
 	p.UpdatedAt = time.Now().UTC()
-	return app.GetEnvironment().GetSession().Query(`INSERT INTO ocm.presentation_profiles (tenant_id,group_id,profile_type,interaction_type,profile_id,enabled,did,origin,key_namespace,key_group,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.TenantID, p.GroupID, p.ProfileType, p.InteractionType, gocql.UUID(p.ProfileID), p.Enabled, p.DID, p.Origin, p.KeyNamespace, p.KeyGroup, p.KeyID, p.SigningAlgorithm, p.ResponseMode, p.RequestObjectTTLSeconds, p.RequestObjectPolicyURL, p.CredentialSelectionPolicyURL, p.PresentationPolicies, p.CreatedAt, p.UpdatedAt).WithContext(ctx).Exec()
+	LogRouting("profile.write", p.TenantID, p.GroupID, "", p.KeyNamespace, p.KeyGroup, p.KeyID, false)
+	err := app.GetEnvironment().GetSession().Query(`INSERT INTO ocm.presentation_profiles (tenant_id,group_id,profile_type,interaction_type,profile_id,enabled,did,origin,key_namespace,key_group,key_id,signing_algorithm,response_mode,request_object_ttl_seconds,request_object_policy_url,credential_selection_policy_url,presentation_policies,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, p.TenantID, p.GroupID, p.ProfileType, p.InteractionType, gocql.UUID(p.ProfileID), p.Enabled, p.DID, p.Origin, p.KeyNamespace, p.KeyGroup, p.KeyID, p.SigningAlgorithm, p.ResponseMode, p.RequestObjectTTLSeconds, p.RequestObjectPolicyURL, p.CredentialSelectionPolicyURL, p.PresentationPolicies, p.CreatedAt, p.UpdatedAt).WithContext(ctx).Exec()
+	LogRouting("profile.write_result", p.TenantID, p.GroupID, "", p.KeyNamespace, p.KeyGroup, p.KeyID, err != nil)
+	return err
 }
 
 // ListPresentationProfilesForAdmin lists all profiles within a tenant/group partition,
@@ -143,6 +148,7 @@ func ListPresentationProfilesForAdmin(ctx context.Context, tenant, group string)
 			break
 		}
 		profile.ProfileID = uuid.UUID(dbProfileID)
+		LogRouting("profile.list_item", tenant, group, "", profile.KeyNamespace, profile.KeyGroup, profile.KeyID, false)
 		profiles = append(profiles, profile)
 	}
 	if err := iter.Close(); err != nil {
@@ -157,5 +163,8 @@ func DeletePresentationProfileForAdmin(ctx context.Context, tenant, group, kind,
 	if tenant == "" || group == "" || !ValidProfileType(kind) || !ValidInteractionType(interaction) {
 		return errors.New("invalid profile key")
 	}
-	return app.GetEnvironment().GetSession().Query(`DELETE FROM ocm.presentation_profiles WHERE tenant_id=? AND group_id=? AND profile_type=? AND interaction_type=?`, tenant, group, kind, interaction).WithContext(ctx).Consistency(gocql.LocalQuorum).Exec()
+	LogRouting("profile.delete", tenant, group, "", "", "", "", false)
+	err := app.GetEnvironment().GetSession().Query(`DELETE FROM ocm.presentation_profiles WHERE tenant_id=? AND group_id=? AND profile_type=? AND interaction_type=?`, tenant, group, kind, interaction).WithContext(ctx).Consistency(gocql.LocalQuorum).Exec()
+	LogRouting("profile.delete_result", tenant, group, "", "", "", "", err != nil)
+	return err
 }

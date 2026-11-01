@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -122,7 +121,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 		if row.GroupId != state.GroupId || row.RequestId != state.RequestId {
 			return nil, errors.New("request object state does not match stored authorization")
 		}
-		if row.ProfileKeyNamespace == "" || row.ProfileKeyID == "" {
+		if row.ProfileKeyNamespace == "" || row.ProfileKeyGroup == "" || row.ProfileKeyID == "" {
 			return nil, errors.New("missing signer snapshot in authorization state")
 		}
 
@@ -140,7 +139,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			ResponseMode: "direct_post",
 			DCQLQuery:    &row.DCQLQuery,
 		}
-		requestor.logger.Info("OID4VP authorization request prepared", "tenantId", tenantId, "groupId", state.GroupId, "requestId", state.RequestId, "clientId", authRequest.ClientID, "responseUri", authRequest.ResponseURI, "responseMode", authRequest.ResponseMode, "responseType", authRequest.ResponseType)
+		requestor.logger.Info("OID4VP authorization request prepared", "tenantId", tenantId, "groupId", state.GroupId, "requestId", state.RequestId, "responseMode", authRequest.ResponseMode, "responseType", authRequest.ResponseType)
 		if err := authRequest.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid OID4VP authorization request: %w", err)
 		}
@@ -150,23 +149,7 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			return nil, err
 		}
 
-		// Explicit opt-in: this logs the full authorization request including nonce, state and DCQL.
-		// Enable only temporarily in a protected development environment.
-		if os.Getenv("OID4VP_DEBUG_REQUEST_OBJECT") == "true" {
-			requestor.logger.Info("OID4VP DEBUG unsigned request object payload", "payload", string(pb))
-		}
-
-		var req = msg.CreateTokenRequest{
-			Request: commonMessageTypes.Request{
-				TenantId:  tenantId,
-				GroupId:   groupId,
-				RequestId: uuid.NewString(),
-			},
-			Namespace: row.ProfileKeyNamespace,
-			Group:     row.ProfileKeyGroup,
-			Key:       row.ProfileKeyID,
-			Payload:   pb,
-		}
+		req := createRequestObjectTokenRequest(row, pb)
 
 		js, err := json.Marshal(req)
 
@@ -180,8 +163,10 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			return nil, err
 		}
 
-		requestor.logger.Info("OID4VP sending signing request", "tenantId", tenantId, "requestId", state.RequestId, "namespace", row.ProfileKeyNamespace, "keyId", row.ProfileKeyID)
+		common.LogRouting("signer.create_token.send", req.TenantId, req.GroupId, row.RequestId, req.Namespace, req.Group, req.Key, false)
+		requestor.logger.Info("OID4VP signer correlation", "requestId", row.RequestId, "signerRequestId", req.RequestId)
 		res, err := requestor.signerClient.RequestCtx(ctx, ev)
+		common.LogRouting("signer.create_token.transport_result", req.TenantId, req.GroupId, row.RequestId, req.Namespace, req.Group, req.Key, err != nil)
 
 		if err != nil {
 			return nil, err
@@ -190,11 +175,22 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 		var rep msg.CreateTokenReply
 
 		err = json.Unmarshal(res.DataEncoded, &rep)
+		common.LogRouting("signer.create_token.decode_result", req.TenantId, req.GroupId, row.RequestId, req.Namespace, req.Group, req.Key, err != nil)
 
 		if err != nil {
 			return nil, err
 		}
 
+		requestor.logger.Info("OID4VP signer reply routing", "tenantId", req.TenantId, "groupId", req.GroupId,
+			"requestId", row.RequestId, "signerRequestId", req.RequestId,
+			"replyTenantId", rep.TenantId, "replyGroupId", rep.GroupId, "replyRequestId", rep.RequestId,
+			"namespace", req.Namespace, "keyGroup", req.Group,
+			"replyRoutingMismatch", (rep.TenantId != "" && rep.TenantId != req.TenantId) || (rep.GroupId != "" && rep.GroupId != req.GroupId) || (rep.RequestId != "" && rep.RequestId != req.RequestId))
+		if rep.Error != nil || len(rep.Token) == 0 {
+			common.LogRouting("signer.create_token.rejected", req.TenantId, req.GroupId, row.RequestId, req.Namespace, req.Group, req.Key, true)
+			return nil, errors.New("signer rejected request or returned empty token")
+		}
+		common.LogRouting("signer.create_token.success", req.TenantId, req.GroupId, row.RequestId, req.Namespace, req.Group, req.Key, false)
 		requestor.logger.Info("OID4VP signer replied", "tenantId", tenantId, "requestId", state.RequestId, "tokenBytes", len(rep.Token))
 
 		err = common.UpdateDbStatus(ctx, tenantId, string(model.PresentationRequestObjectFetched), id)
@@ -203,12 +199,6 @@ func (requestor *PresentationRequestor) GetRequestObjectAndSetObjectFetched(ctx 
 			return nil, err
 		}
 
-		// Log the exact JWT bytes returned to the HTTP handler on GET.
-		// The full JWT is sensitive: enable only for short-lived debugging.
-		requestor.logger.Info("OID4VP request.jwt returned to GET handler", "tenantId", tenantId, "requestId", state.RequestId, "bytes", len(rep.Token))
-		if os.Getenv("OID4VP_DEBUG_REQUEST_OBJECT") == "true" {
-			requestor.logger.Info("OID4VP DEBUG GET request.jwt response", "jwt", string(rep.Token))
-		}
 		return rep.Token, nil
 	}
 	return nil, err
@@ -314,6 +304,10 @@ func (requestor *PresentationRequestor) CreateFromPolicy(ctx context.Context, te
 	if err != nil {
 		return nil, err
 	}
+	if options.TenantId != tenant || options.GroupId != group {
+		return nil, errors.New("authorization options do not match tenant/group context")
+	}
+	common.LogRouting("authorization.profile_resolved", tenant, group, options.RequestId, profile.KeyNamespace, profile.KeyGroup, profile.KeyID, false)
 	options.ClientId = "decentralized_identifier:" + profile.DID
 	options.ProfileOrigin = profile.Origin
 	options.ProfileInteraction = interaction
@@ -428,4 +422,34 @@ func (requestor *PresentationRequestor) presentationResultReply(reply messaging.
 		return nil, err
 	}
 	return &e, nil
+}
+
+func createRequestObjectTokenRequest(
+	row *model.VerificationEntry,
+	pb []byte,
+) msg.CreateTokenRequest {
+	did := strings.TrimPrefix(
+		row.ClientId,
+		"decentralized_identifier:",
+	)
+
+	kid := did + "#" + row.ProfileKeyID
+
+	header, _ := json.Marshal(map[string]string{
+		"typ": "oauth-authz-req+jwt",
+		"kid": kid,
+	})
+
+	return msg.CreateTokenRequest{
+		Request: commonMessageTypes.Request{
+			TenantId:  row.TenantId,
+			GroupId:   row.GroupId,
+			RequestId: uuid.NewString(),
+		},
+		Namespace: row.ProfileKeyNamespace,
+		Group:     row.ProfileKeyGroup,
+		Key:       row.ProfileKeyID,
+		Payload:   pb,
+		Header:    header,
+	}
 }

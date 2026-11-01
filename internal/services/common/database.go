@@ -64,6 +64,7 @@ func scanEntries(iter connection.IterInterface) ([]model.VerificationEntry, erro
 			}
 			row.ClientMetadata = &metadata
 		}
+		LogRouting("cassandra.presentation.scanned", row.TenantId, row.GroupId, row.RequestId, row.ProfileKeyNamespace, row.ProfileKeyGroup, row.ProfileKeyID, false)
 		ret = append(ret, row)
 	}
 	if err := iter.Close(); err != nil {
@@ -80,7 +81,9 @@ func getEntryByKey(ctx context.Context, tenantId, groupId, requestId string) (*m
 	partition := env.GetAccountPartition(groupId)
 	selectCols := `partition,region,country,tenantId,groupId,requestId,dcqlQuery,presentation,redirectUri,status,last_update_timestamp,nonce,responseUri,responseMode,responseType,clientId,authorizationState,clientMetadata,consent_mode,profile_interaction,profile_key_namespace,profile_key_group,profile_key_id,profile_origin`
 	q := fmt.Sprintf(`SELECT %s FROM %s WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`, selectCols, presentationsTable)
+	LogRouting("cassandra.presentation.read", tenantId, groupId, requestId, "", "", "", false)
 	rows, err := scanEntries(env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId).WithContext(ctx).Consistency(gocql.LocalQuorum).Iter())
+	LogRouting("cassandra.presentation.read_result", tenantId, groupId, requestId, "", "", "", err != nil || len(rows) == 0)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +147,10 @@ func AddDCQLQueryToDb(pd presentation.DCQLQuery, options PresentationRequestOpti
 		return err
 	}
 	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,dcqlQuery,status,last_update_timestamp,nonce,clientId,consent_mode,profile_interaction,profile_key_namespace,profile_key_group,profile_key_id,profile_origin) VALUES(?,?,?,?,?,?,?,?,toTimestamp(now()),?,?,?,?,?,?,?,?) USING TTL ?`
-	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawURLEncoding.EncodeToString(nonce), options.ClientId, model.ConsentManual, options.ProfileInteraction, options.ProfileKeyNamespace, options.ProfileKeyGroup, options.ProfileKeyID, options.ProfileOrigin, options.Ttl).WithContext(ctx).Exec()
+	LogRouting("cassandra.AddDCQLQueryToDb.write", options.TenantId, options.GroupId, options.RequestId, options.ProfileKeyNamespace, options.ProfileKeyGroup, options.ProfileKeyID, false)
+	err = env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), options.TenantId, options.GroupId, options.RequestId, base64.RawStdEncoding.EncodeToString(bpd), model.PresentationRequested, base64.RawURLEncoding.EncodeToString(nonce), options.ClientId, model.ConsentManual, options.ProfileInteraction, options.ProfileKeyNamespace, options.ProfileKeyGroup, options.ProfileKeyID, options.ProfileOrigin, options.Ttl).WithContext(ctx).Exec()
+	LogRouting("cassandra.AddDCQLQueryToDb.write_result", options.TenantId, options.GroupId, options.RequestId, options.ProfileKeyNamespace, options.ProfileKeyGroup, options.ProfileKeyID, err != nil)
+	return err
 }
 
 func updateKey(ctx context.Context, tenantId, id string) (*model.VerificationEntry, error) {
@@ -176,7 +182,10 @@ func UpdateDbStatus(ctx context.Context, tenantId, status, id string) error {
 	}
 	env := appCommon.GetEnvironment()
 	q := `UPDATE ocm.presentations USING TTL ? SET status=?,last_update_timestamp=toTimestamp(now()) WHERE partition=? AND region=? AND country=? AND tenantId=? AND groupId=? AND requestId=?`
-	return env.GetSession().Query(q, ttl, status, row.Partition, row.Region, row.Country, row.TenantId, row.GroupId, row.RequestId).WithContext(ctx).Exec()
+	LogRouting("cassandra.status.write", row.TenantId, row.GroupId, row.RequestId, row.ProfileKeyNamespace, row.ProfileKeyGroup, row.ProfileKeyID, false)
+	err = env.GetSession().Query(q, ttl, status, row.Partition, row.Region, row.Country, row.TenantId, row.GroupId, row.RequestId).WithContext(ctx).Exec()
+	LogRouting("cassandra.status.write_result", row.TenantId, row.GroupId, row.RequestId, row.ProfileKeyNamespace, row.ProfileKeyGroup, row.ProfileKeyID, err != nil)
+	return err
 }
 
 func StorePresentation(ctx context.Context, id, tenantId string, proof []byte) error {
@@ -217,7 +226,10 @@ func StoreRequest(ctx context.Context, requestId, tenantId, groupId, consentMode
 		return err
 	}
 	q := `INSERT INTO ocm.presentations (partition,region,country,tenantId,groupId,requestId,status,last_update_timestamp,dcqlQuery,redirectUri,nonce,responseUri,responseMode,responseType,clientId,authorizationState,clientMetadata,consent_mode) VALUES(?,?,?,?,?,?,?,toTimestamp(now()),?,?,?,?,?,?,?,?,?,?) USING TTL ?`
-	return env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId, model.StatusPending, base64.RawStdEncoding.EncodeToString(b), requestObject.RedirectURI, requestObject.Nonce, requestObject.ResponseURI, requestObject.ResponseMode, requestObject.ResponseType, requestObject.ClientID, requestObject.State, base64.RawStdEncoding.EncodeToString(metadata), consentMode, ttl).WithContext(ctx).Exec()
+	LogRouting("cassandra.StoreRequest.write", tenantId, groupId, requestId, "", "", "", false)
+	err = env.GetSession().Query(q, partition, env.GetRegion(), env.GetCountry(), tenantId, groupId, requestId, model.StatusPending, base64.RawStdEncoding.EncodeToString(b), requestObject.RedirectURI, requestObject.Nonce, requestObject.ResponseURI, requestObject.ResponseMode, requestObject.ResponseType, requestObject.ClientID, requestObject.State, base64.RawStdEncoding.EncodeToString(metadata), consentMode, ttl).WithContext(ctx).Exec()
+	LogRouting("cassandra.StoreRequest.write_result", tenantId, groupId, requestId, "", "", "", err != nil)
+	return err
 }
 
 // TryBeginFulfillment checks the current state before a non-atomic update.

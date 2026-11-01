@@ -31,7 +31,7 @@ func getRequestObject(request_uri string, outerClientID string, ctx context.Cont
 
 	presRequest, err := sendRequestWithRedirects(requestUrl, ctx, outerClientID)
 	if err != nil {
-		logger.Error(err, "error getting request object for url "+requestUrl.String())
+		logger.Info("Request object fetch failed", "failed", true)
 		return nil, err
 	}
 	return presRequest, err

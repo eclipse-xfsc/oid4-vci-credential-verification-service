@@ -288,7 +288,7 @@ func postResponse(ctx context.Context, vpToken presentation.VPToken, row *model.
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rep, err := shared.ExternalHTTPClient(commonTypes.GetEnvironment().GetConfig()).Do(req)
 	if err != nil {
-		logger.Error(err, "Error during posting response", "responseUri", row.ResponseUri)
+		shared.LogRouting("holder.response.post_failed", row.TenantId, row.GroupId, row.RequestId, "", "", "", true)
 		return err
 	}
 	defer rep.Body.Close()
@@ -377,7 +377,7 @@ func signerServiceSignPresentations(payload ProofModel, row *model.VerificationE
 				if err != nil {
 					return nil, err
 				}
-				logger.Info("Signed Token:", "vp_token", string(signed))
+				logger.Info("Presentation signed", "tokenBytes", len(signed))
 
 				// A dc+sd-jwt presentation is a compact string. VPToken stores JSON
 				// values as RawMessage, therefore it must be JSON-encoded first.
@@ -412,7 +412,7 @@ func signerServiceSignPresentations(payload ProofModel, row *model.VerificationE
 			if err != nil {
 				return nil, err
 			}
-			logger.Info("Signed Token:", "vp_token", string(signed))
+			logger.Info("Presentation signed", "tokenBytes", len(signed))
 			raw := json.RawMessage(bytes.TrimSpace(signed))
 			if !json.Valid(raw) {
 				return nil, fmt.Errorf("signer returned invalid JSON for LDP VC DCQL query %s", queryID)
@@ -477,9 +477,8 @@ func processPresentationData(
 
 	if rep.StatusCode < 200 || rep.StatusCode >= 300 {
 		return nil, fmt.Errorf(
-			"signer service returned HTTP %d: %s",
+			"signer service returned HTTP %d",
 			rep.StatusCode,
-			strings.TrimSpace(string(respBody)),
 		)
 	}
 

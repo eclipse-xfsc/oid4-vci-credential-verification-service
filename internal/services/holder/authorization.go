@@ -33,17 +33,6 @@ type ProcessedAuthorizationRequest struct {
 	Nonce string
 }
 
-func logRequestObject(logger logr.Logger, object interface{}) {
-
-	data, err := json.MarshalIndent(object, "", "  ")
-	if err != nil {
-		logger.Error(err, "Failed to marshal OID4VP request object")
-		return
-	}
-	logger.Info("OID4VP Request Object", "request", string(data))
-
-}
-
 func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, clientId string, request_uri string, tenantId string, groupId string, requestId string, consentMode string, ttl int, config *model.Config) (*ProcessedAuthorizationRequest, error) {
 	if consentMode != model.ConsentManual && consentMode != model.ConsentAuto {
 		return nil, errors.New("consentMode must be manual or auto")
@@ -58,7 +47,7 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	if err != nil {
 		return nil, err
 	}
-	logRequestObject(handler.logger, object)
+	shared.LogRouting("holder.authorization.received", tenantId, groupId, requestId, "", "", "", false)
 	if err := object.AuthorizationRequest.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid OID4VP request object: %w", err)
 	}
@@ -72,6 +61,7 @@ func (handler *AuthorizationHandler) HandleRequestObject(ctx context.Context, cl
 	if profileErr != nil {
 		return nil, profileErr
 	}
+	shared.LogRouting("holder.authorization.profile_resolved", tenantId, groupId, requestId, profile.KeyNamespace, profile.KeyGroup, profile.KeyID, false)
 	if profile.RequestObjectPolicyURL != "" {
 		res, err := GetPolicyResult(object, profile.RequestObjectPolicyURL)
 		if err != nil {
@@ -122,9 +112,7 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 		ctx := context.WithValue(c.Request.Context(), HeaderContextKey, c.Request.Header)
 		if ok {
 			groupID := c.GetHeader("x-groupId")
-			if groupID == "" {
-				groupID = c.GetHeader("x-group")
-			}
+
 			requestID := c.GetHeader("x-requestId")
 			if requestID == "" {
 				requestID = c.GetHeader("x-request-id")
@@ -135,7 +123,7 @@ func (handler *AuthorizationHandler) HandleAuthorizationRequest(c *gin.Context, 
 				return
 			}
 			redirectURI := buildAuthorizationRedirect(authURL, processed)
-			handler.logger.Info("Redirect to: " + redirectURI)
+			shared.LogRouting("holder.authorization.redirect", tenantID, groupID, requestID, "", "", "", false)
 			c.Redirect(http.StatusFound, redirectURI)
 		} else {
 			shared.ErrorResponse(c, "Path Variable missing.", errors.ErrUnsupported)
