@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bytedance/gopkg/util/logger"
 	shared "github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
+	"go.uber.org/zap"
 
 	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	storageMessaging "github.com/eclipse-xfsc/credential-storage-service/pkg/messaging"
@@ -310,16 +312,106 @@ func extractVerifiedSDJWTClaims(compact []byte) (map[string]any, error) {
 	return payload, nil
 }
 
-func validateDisclosedCredential(queryID string, disclosed any, credentialQuery presentation.CredentialQuery) error {
-	candidates := map[string]any{"disclosed": disclosed}
-	single := presentation.DCQLQuery{Credentials: []presentation.CredentialQuery{credentialQuery}}
+func validateDisclosedCredential(
+	queryID string,
+	disclosed any,
+	credentialQuery presentation.CredentialQuery,
+) error {
+	logger.Info("DCQL validation started",
+		zap.String("queryID", queryID),
+		zap.String("disclosedType", fmt.Sprintf("%T", disclosed)),
+		zap.String("credentialFormat", string(credentialQuery.Format)),
+		zap.Any("credentialQuery", credentialQuery),
+	)
+
+	// Debug: Disclosed Credential als JSON ausgeben.
+	// Achtung: Kann personenbezogene Credential-Claims enthalten.
+	if data, err := json.MarshalIndent(disclosed, "", "  "); err == nil {
+		logger.Debug("DCQL disclosed credential",
+			zap.String("queryID", queryID),
+			zap.ByteString("disclosed", data),
+		)
+	} else {
+		logger.Warn("DCQL disclosed credential serialization failed",
+			zap.String("queryID", queryID),
+			zap.Error(err),
+		)
+	}
+
+	candidates := map[string]any{
+		"disclosed": disclosed,
+	}
+
+	single := presentation.DCQLQuery{
+		Credentials: []presentation.CredentialQuery{
+			credentialQuery,
+		},
+	}
+
+	logger.Debug("DCQL filter input",
+		zap.String("queryID", queryID),
+		zap.Int("candidateCount", len(candidates)),
+		zap.Any("query", single),
+	)
+
 	matches, err := single.Filter(candidates)
+
 	if err != nil {
-		return fmt.Errorf("evaluate disclosed credential for DCQL query %q: %w", queryID, err)
+		logger.Error("DCQL filter execution failed",
+			zap.String("queryID", queryID),
+			zap.Error(err),
+		)
+
+		return fmt.Errorf(
+			"evaluate disclosed credential for DCQL query %q: %w",
+			queryID,
+			err,
+		)
 	}
-	if len(matches) == 0 || len(matches[0].Credentials) == 0 {
-		return fmt.Errorf("disclosed credential does not satisfy DCQL query %q", queryID)
+
+	logger.Info("DCQL filter completed",
+		zap.String("queryID", queryID),
+		zap.Int("matchCount", len(matches)),
+	)
+
+	for i, match := range matches {
+		logger.Debug("DCQL filter match",
+			zap.String("queryID", queryID),
+			zap.Int("matchIndex", i),
+			zap.Int("credentialCount", len(match.Credentials)),
+		)
 	}
+
+	if len(matches) == 0 {
+		logger.Warn("DCQL validation failed: no matches",
+			zap.String("queryID", queryID),
+			zap.String("credentialFormat", string(credentialQuery.Format)),
+		)
+
+		return fmt.Errorf(
+			"disclosed credential does not satisfy DCQL query %q",
+			queryID,
+		)
+	}
+
+	if len(matches[0].Credentials) == 0 {
+		logger.Warn("DCQL validation failed: first match has no credentials",
+			zap.String("queryID", queryID),
+			zap.Int("matchCount", len(matches)),
+		)
+
+		return fmt.Errorf(
+			"disclosed credential does not satisfy DCQL query %q",
+			queryID,
+		)
+	}
+
+	logger.Info("DCQL validation successful",
+		zap.String("queryID", queryID),
+		zap.Int("matchCount", len(matches)),
+		zap.Int("matchedCredentials", len(matches[0].Credentials)),
+	)
+
 	return nil
 }
 
