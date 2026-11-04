@@ -392,7 +392,7 @@ func (requestor *PresentationRequestor) forwardPresentation(tenantId string, req
 		return
 	}
 
-	e, err := cloudeventprovider.NewEvent(requestor.storagePubTopic, storageMessaging.StorePresentationType, b)
+	e, err := cloudeventprovider.NewEvent("verification service", storageMessaging.StorePresentationType, b)
 
 	if err != nil {
 		requestor.logger.Error(err, "error in json marshalling")
@@ -402,7 +402,7 @@ func (requestor *PresentationRequestor) forwardPresentation(tenantId string, req
 	err = requestor.storageClient.PubCtx(context.Background(), e)
 
 	if err != nil {
-		requestor.logger.Error(err, "error in json marshalling")
+		requestor.logger.Error(err, "failed to publish storage update")
 		return
 	}
 }
