@@ -16,6 +16,7 @@ import (
 	"github.com/cloudevents/sdk-go/v2/event"
 	cloudeventprovider "github.com/eclipse-xfsc/cloud-event-provider"
 	msg "github.com/eclipse-xfsc/crypto-provider-service/v2/pkg/messaging"
+	msglib "github.com/eclipse-xfsc/nats-message-library"
 	commonMessageTypes "github.com/eclipse-xfsc/nats-message-library/common"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/model"
 	"github.com/eclipse-xfsc/oid4-vci-credential-verification-service/internal/services/common"
@@ -49,6 +50,10 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 	requestor.presentationRequestTopic = config.PresentationRequest
 	requestor.storagePubTopic = config.StorageRequest
 
+	if requestor.storagePubTopic == "" {
+		requestor.storagePubTopic = msglib.StorageTopic
+	}
+
 	client, err := cloudeventprovider.New(cloudeventprovider.Config{Protocol: cloudeventprovider.ProtocolTypeNats, Settings: cloudeventprovider.NatsConfig{
 		Url:          config.Nats.Url,
 		QueueGroup:   config.Nats.QueueGroup,
@@ -79,7 +84,7 @@ func (requestor *PresentationRequestor) Initialize(config *model.Config, logger 
 		Url:          config.Nats.Url,
 		QueueGroup:   config.Nats.QueueGroup,
 		TimeoutInSec: time.Minute,
-	}}, cloudeventprovider.Pub, config.StorageRequest)
+	}}, cloudeventprovider.Pub, requestor.storagePubTopic)
 
 	if err != nil {
 		logger.Error(err, "Error during message creation")
