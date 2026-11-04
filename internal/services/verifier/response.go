@@ -388,21 +388,21 @@ func (requestor *PresentationRequestor) forwardPresentation(tenantId string, req
 	b, err := json.Marshal(msg)
 
 	if err != nil {
-		requestor.logger.Error(err, "error in json marshalling", err)
+		requestor.logger.Error(err, "error in json marshalling")
 		return
 	}
 
 	e, err := cloudeventprovider.NewEvent(requestor.storagePubTopic, storageMessaging.StorePresentationType, b)
 
 	if err != nil {
-		requestor.logger.Error(err, "error in json marshalling", err)
+		requestor.logger.Error(err, "error in json marshalling")
 		return
 	}
 
 	err = requestor.storageClient.PubCtx(context.Background(), e)
 
 	if err != nil {
-		requestor.logger.Error(err, "error in json marshalling", err)
+		requestor.logger.Error(err, "error in json marshalling")
 		return
 	}
 }
