@@ -88,6 +88,8 @@ github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.2 h1:f05Z30U37lZ3ZxQuH196NTz3xm
 github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.2/go.mod h1:7p0Pr9dqpxru5Tj8+hh74Ps4yZcbROJzwEfRvipejsQ=
 github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.3 h1:Mog1kqhPBOX0vDds7Woe5qYGNTy8Zbg5/k/V0vOut/g=
 github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.3/go.mod h1:7p0Pr9dqpxru5Tj8+hh74Ps4yZcbROJzwEfRvipejsQ=
+github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.4 h1:DmLZgZmHFyB5jgFc4LXBHCwXy7iEvnhL2+FoTueZp9w=
+github.com/eclipse-xfsc/oid4-vci-vp-library v1.9.4/go.mod h1:7p0Pr9dqpxru5Tj8+hh74Ps4yZcbROJzwEfRvipejsQ=
 github.com/eclipse-xfsc/ssi-jwt v1.2.1/go.mod h1:sYdF2Y0BYEjui8QD++K0kti+8N0riH+aTlf+ynjmQFw=
 github.com/eclipse-xfsc/ssi-jwt/v2 v2.2.0 h1:JDsx/iPimPGWnBy1qvVDc2vvWmyS/yY0Fo4X+lbAYA4=
 github.com/eclipse-xfsc/ssi-jwt/v2 v2.2.0/go.mod h1:AanSJ720LclsvKfLgB5U4LnnIAAAMAcI949ILddY3EA=
