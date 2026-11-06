@@ -67,8 +67,6 @@ spec:
               value: {{ .Values.config.topics.authorizationReply | quote }}
             - name: CREDENTIALVERIFICATION_PROOFNOTIFY
               value: {{ .Values.config.topics.proofNotify | quote }}
-            - name: CREDENTIALVERIFICATION_STORAGE_URL
-              value: {{ .Values.config.storageServiceUrl | quote }}
             - name: CREDENTIALVERIFICATION_PRESENTATIONREQUEST
               value: {{ .Values.config.topics.presentationRequest | quote }}
             - name: CREDENTIALVERIFICATION_EXTERNALPRESENTATION_ENABLED
@@ -100,6 +98,8 @@ spec:
               value: {{ .Values.config.cassandra.keyspace | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_USER
               value: {{ .Values.config.cassandra.user | quote }}
+            - name: CREDENTIALVERIFICATION_STORAGE_URL
+              value: {{ .Values.config.storageServiceUrl | quote }}
             - name: CREDENTIALVERIFICATION_CASSANDRA_PASSWORD
               valueFrom:
                 secretKeyRef:
