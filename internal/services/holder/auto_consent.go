@@ -34,10 +34,13 @@ func AutoConsent(ctx context.Context, cfg *model.Config, row *model.Verification
 			ids = append(ids, CredentialSelection{QueryId: g.Id, CredentialID: id})
 		}
 	}
-	result, err := GetPolicyResult(map[string]interface{}{"tenantId": row.TenantId, "groupId": row.GroupId, "clientId": row.ClientId, "dcqlQuery": row.DCQLQuery, "credentials": ids}, profile.CredentialSelectionPolicyURL)
+	output, err := GetPolicyResult(map[string]interface{}{"tenantId": row.TenantId, "groupId": row.GroupId, "clientId": row.ClientId, "dcqlQuery": row.DCQLQuery, "credentials": ids}, profile.CredentialSelectionPolicyURL)
 	if err != nil {
 		return err
 	}
+
+	result := output["result"].(map[string]interface{})
+
 	approved, ok := result["approved"].(bool)
 	if !ok {
 		return errors.New("policy response missing approved boolean")
