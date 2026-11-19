@@ -1,1389 +1,351 @@
-# Presentation Profiles — current architecture
+# XFSC OID4VC Credential Verification Service
 
-The service resolves OID4VP configuration by `(tenant_id, group_id, profile_type, interaction_type)` from **`ocm.presentation_profiles`**. Verifier permission sets (for example `mitgliedschaft`) map directly to DCQL JSON inside `presentation_policies`; there is **no separate presentation-policy service**. HTTP authorizations select `verifier/human`, NATS selects `verifier/machine`. Profile UUIDs are internal and are not required by callers.
+OID4VP 1.0 service for **verifier** and **holder** workflows in the Eclipse XFSC OCM stack. It creates and processes OID4VP Authorization Requests, persists transaction state, matches credentials against DCQL, delegates cryptographic operations to the Crypto Provider, and integrates with Credential Storage, Cassandra and NATS.
+
+> **Documentation scope:** This guide consolidates the supplied project documentation. Route names, event schemas and version numbers are drawn from that material; verify them against the exact deployed revision before production rollout. Legacy interfaces and unresolved discrepancies are called out explicitly.
+
+## Contents
+
+- [Architecture](#architecture)
+- [Presentation profiles](#presentation-profiles)
+- [Verifier workflow](#verifier-workflow)
+- [Holder workflow](#holder-workflow)
+- [Consent and selection](#consent-and-selection)
+- [HTTP and NATS interfaces](#http-and-nats-interfaces)
+- [Configuration](#configuration)
+- [Security](#security)
+- [Testing and operations](#testing-and-operations)
+- [Known limitations and migration notes](#known-limitations-and-migration-notes)
+
+## Architecture
+
+The service operates in two distinct roles:
+
+- **Verifier:** Creates a signed OID4VP Request Object from an authorized DCQL query, receives a wallet's `vp_token`, verifies the presentation and its disclosed claims, and stores/notifies the result.
+- **Holder:** Accepts a signed request from an external verifier, retrieves matching credentials, obtains human or machine consent, builds a presentation, and sends it to the external verifier.
+
+```mermaid
+flowchart LR
+    App["Trusted application"] -->|"Authorization / DCQL"| CVS["Verification Service"]
+    Wallet["Wallet / Holder"] <-->|"OID4VP request and response"| CVS
+    External["External verifier"] <-->|"Request Object and VP response"| CVS
+    CVS <-->|"Transactions and snapshots"| DB[(Cassandra)]
+    CVS <-->|"Events and request/reply"| NATS[(NATS)]
+    CVS <-->|"Credential lookup"| Storage["Credential Storage"]
+    CVS <-->|"Signing and verification"| Crypto["Crypto Provider"]
+    CVS -->|"Consent / selection decision"| Policy["Optional Policy Client"]
+```
+
+The **DCQL query stored with each transaction is authoritative**. Subsequent validation must use that snapshot, not a template that may have changed in the meantime. DCQL is the current query mechanism; `presentation_definition` / Presentation Exchange belongs to older integrations.
+
+### Main dependencies
+
+| Component | Responsibility |
+| --- | --- |
+| Cassandra | Transaction state, nonce, DCQL snapshot, consent state, presentation metadata |
+| Credential Storage Service | Holder credential retrieval and DCQL candidate matching; storage events |
+| Crypto Provider / Signer | Request Object signing, VP generation and cryptographic verification |
+| NATS | Internal authorization request/reply, notifications and result retrieval |
+| Policy Client | Optional automated consent / credential selection |
+| OID4VP library | Request/response models, DCQL validation and matching |
+
+The supplied documentation references Go 1.25 and `oid4-vci-vp-library v1.9.2`; check `go.mod` for the authoritative versions.
+
+## Presentation profiles
+
+Current profile-based configuration resolves OID4VP settings from the Cassandra table `ocm.presentation_profiles`, keyed by:
+
+`(tenant_id, group_id, profile_type, interaction_type)`
+
+The four combinations are `verifier/human`, `verifier/machine`, `holder/human`, and `holder/machine`. Verifier permission sets (for example `mitgliedschaft`) map to concrete DCQL JSON in the profile's `presentation_policies`. Profile UUIDs are internal; callers do not need them.
 
 ```mermaid
 flowchart TD
-  A[Authorization: tenant + group + permissionSet] --> B{Transport}
-  B -->|HTTP| H[verifier / human]
-  B -->|NATS| M[verifier / machine]
-  H --> DB[(ocm.presentation_profiles)]
-  M --> DB
-  DB --> P[Resolve permissionSet to DCQL]
-  P --> S[Sign OID4VP Request Object using profile key]
-  S --> R[Return request_uri / authorization result]
+    A["Authorization: tenant, group, permissionSet"] --> B{"Transport"}
+    B -->|HTTP| H["verifier / human"]
+    B -->|NATS| M["verifier / machine"]
+    H --> DB[("ocm.presentation_profiles")]
+    M --> DB
+    DB --> P["Resolve permissionSet to DCQL"]
+    P --> S["Sign Request Object with profile key"]
+    S --> R["Return authorization result / request URI"]
 ```
+
+**Profile administration** uses tenant-scoped internal routes and the `x-groupid` partition:
+
+| Method | Route suffix | Behavior |
+| --- | --- | --- |
+| `GET` | `/internal/presentation-profiles` | List all profile combinations, including disabled |
+| `GET` | `/internal/presentation-profiles/{profileType}/{interactionType}` | Read one, including disabled |
+| `PUT` | Same as GET one | Create/update; preserve `profileId` and `createdAt` |
+| `DELETE` | Same as GET one | Idempotent deletion; `204 No Content` |
+
+All routes above are relative to `/v1/tenants/{tenantId}`. The optional JWT/JWKS middleware is enabled by `CREDENTIALVERIFICATION_PROFILE_ADMIN_JWKS_URL`. When enabled, it checks signature, expiration, tenant/group context and the configured scope (default documented as `presentation-profiles:write`, including reads). Configure issuer and audience in production. When disabled, restrict the administration routes at the gateway.
+
+See `docs/PRESENTATION_PROFILES.md`, `docs/PROFILE_ADMIN_JWT.md` and `scripts/profiles/README.md` if present in your checkout.
+
+> **Important distinction:** The profile's embedded `presentation_policies` (permission set → DCQL) is **not** the external **credential-selection Policy Client** used for automatic holder consent. Older documentation about a separate presentation-policy service is superseded by profile-based configuration.
+
+## Verifier workflow
+
+An authorized application creates a presentation request via HTTP or NATS. The service persists the query, nonce and state, and serves a signed Request Object to the wallet. The wallet returns `vp_token` via `direct_post`.
 
 ```mermaid
 sequenceDiagram
-  participant Admin as Profile Administrator
-  participant API as Internal HTTP API
-  participant JWT as Optional JWT/JWKS middleware
-  participant DB as Cassandra
-  Admin->>API: GET list / GET one / PUT / DELETE
-  API->>JWT: Verify signature, expiry, tenant/group and scope
-  Note over JWT: Enabled when JWKS URL configured
-  JWT-->>API: Authorized
-  alt GET list
-    API->>DB: SELECT partition (tenant, group)
-    DB-->>API: Profiles including disabled
-  else GET one
-    API->>DB: SELECT profile key
-    DB-->>API: Profile including disabled
-  else PUT
-    API->>DB: Read existing profile and preserve UUID / createdAt
-    API->>DB: Upsert validated profile
-  else DELETE
-    API->>DB: DELETE exact profile key
-    API-->>Admin: 204 No Content
-  end
-```
-
-```mermaid
-flowchart LR
-  T[Tenant + Group] --> VH[Verifier human profile]
-  T --> VM[Verifier machine profile]
-  T --> HH[Holder human profile]
-  T --> HM[Holder machine profile]
-  VH --> DCQL1[permissionSet → DCQL]
-  VM --> DCQL2[permissionSet → DCQL]
-  HH --> POLICY1[Request Object Policy URL]
-  HM --> POLICY2[Request Object Policy URL]
-```
-
-## Administration
-
-- `GET /v1/tenants/{tenantId}/internal/presentation-profiles/{profileType}/{interactionType}` with `x-groupid` reads a profile, including disabled profiles.
-- `PUT` on the same route creates or updates it; updates retain `profileId` and `createdAt`, including for disabled profiles.
-- The JWT middleware is **off** when `CREDENTIALVERIFICATION_PROFILE_ADMIN_JWKS_URL` is empty. When set, it requires a signed bearer JWT with `exp`, matching `tenant_id` and `group_id`, and `presentation-profiles:write` scope (configurable). Set issuer and audience in production. JWKS is cached for five minutes.
-- Helm values: `profileAdminAuth.jwksUrl`, `.issuer`, `.audience`, `.scope`.
-- Example JSON payloads and shell scripts: [`scripts/profiles/README.md`](scripts/profiles/README.md).
-- `GET /v1/tenants/{tenantId}/internal/presentation-profiles` lists all four profile combinations for the `x-groupid` partition, including disabled profiles; returns `[]` if none exist.
-- `DELETE /v1/tenants/{tenantId}/internal/presentation-profiles/{profileType}/{interactionType}` deletes a profile; returns `204 No Content` (idempotent, including when absent).
-- **All four management methods** (`GET` single/list, `PUT`, `DELETE`) use the same optional JWT middleware and currently require the configured `presentation-profiles:write` scope even for reads. Restrict administrative routes at the network gateway when JWT is disabled.
-
-See [`docs/PRESENTATION_PROFILES.md`](docs/PRESENTATION_PROFILES.md) and [`docs/PROFILE_ADMIN_JWT.md`](docs/PROFILE_ADMIN_JWT.md).
-
----
-
-> **Current profile-based configuration:** See [docs/PRESENTATION_PROFILES.md](docs/PRESENTATION_PROFILES.md). Older presentation-policy service examples below are superseded.
-
-# OID4VC Credential Verification Service
-
-## Security hardening and production configuration (October 2026)
-
-**External Request Objects are authenticated before any request claims are used.** The
-External DID-based Request Objects are verified using the `ssi-jwt/v2` DID key resolver. The outer `client_id` must match the signed claim, and `kid` must identify a key of that DID. Non-DID client identifier methods fail closed until supported.
-
-The uploaded Crypto Provider currently offers `/v1/sign`,
-`/v1/credential/verify`, `/v1/presentation/verify`, and
-`/v1/presentation/proof`; it does **not** expose a general JWS Request Object
-verification endpoint. We therefore verify external Request Objects against a
-DID-bound SSI-JWT verification instead of incorrectly treating credential verification
-as JWT signature verification. If the Signer gains a generic JWS verification
-API, this trust adapter can be replaced without changing the flow.
-
-**Network controls:** External `request_uri` and `response_uri` must use HTTPS
-outside development. `isDev: true` permits HTTP for local testing. External
-URLs cannot point to loopback/private/link-local IP addresses in production,
-including after DNS resolution. HTTP 3xx responses are rejected and **never
-followed**, including on `direct_post`. All outbound HTTP clients have
-10-second timeouts and bounded responses. Internal Storage/Signer/Policy
-service URLs may use Kubernetes-internal HTTP, but also reject redirects.
-
-**Do not forward bearer tokens or cookies** from the inbound authorization
-request when dereferencing an external `request_uri`.
-
-### Holder fulfillment with consent/selection policy
-
-`externalPresentation.credentialSelectionPolicy` is optional for trusted
-headless use. When configured, `/fulfill` sends this JSON request to the
-existing Policy Service over HTTP:
-
-```json
-{
-  "tenantId": "tenant-a",
-  "groupId": "account-a",
-  "clientId": "decentralized_identifier:did:web:verifier.example",
-  "dcqlQuery": {"credentials": [{"id": "identity", "format": "dc+sd-jwt", "meta": {"vct_values": ["urn:example:identity"]}}]},
-  "candidates": [{"description": {"id": "identity"}, "credentials": {"credential-key-1": "<credential>"}}]
-}
-```
-
-Policy Service response:
-
-```json
-{
-  "allow": true,
-  "selection": {
-    "identity": ["credential-key-1"]
-  }
-}
-```
-
-`allow: false` denies disclosure. If `allow: true` and `selection` is absent
-or empty, all matched candidates are used. If `selection` is provided, only
-those query IDs and credential keys are retained; unknown credential keys or
-empty selections fail closed. Consent and user interaction happen **before**
-`/fulfill`; the service never infers user consent from DCQL matching.
-
-```mermaid
-sequenceDiagram
-    participant App as Authorized Application / Consent UI
-    participant CVS as Verification Service (Holder role)
+    autonumber
+    participant App as Trusted application
+    participant CVS as Verification Service
     participant DB as Cassandra
+    participant Signer as Crypto Provider
+    participant Wallet
+    App->>CVS: Create request with permissionSet / DCQL
+    CVS->>CVS: Resolve profile and validate DCQL
+    CVS->>DB: Persist nonce, state and DCQL snapshot
+    CVS-->>App: Authorization URL / presentation ID
+    Wallet->>CVS: GET request_uri
+    CVS->>DB: Load stored transaction
+    CVS->>Signer: Sign Request Object
+    Signer-->>CVS: Signed JWT
+    CVS-->>Wallet: application/jwt
+    Wallet->>CVS: POST direct_post (vp_token, state)
+    CVS->>DB: Load nonce and original DCQL
+    CVS->>Signer: Verify presentation and credentials
+    Signer-->>CVS: Verification result and disclosed claims
+    CVS->>CVS: Validate disclosed claims against DCQL
+    CVS->>DB: Persist verified result
+    CVS-->>Wallet: Protocol response
+```
+
+The verifier's Request Object endpoint is documented as `GET /presentation/proof/{state}/request-object/request.jwt`. The response is the **raw compact JWT** with media type `application/jwt`, not a JSON string. The documented incoming response endpoint is `POST /presentation/proof/{state}` using form fields `vp_token` and `state`.
+
+The service's own verifier endpoint currently advertises **`direct_post` only**. Incoming `direct_post.jwt` is not implemented according to the supplied operator guide. Do not confuse this with the holder's ability to **send** `direct_post.jwt` to an external verifier.
+
+The verifier must perform both cryptographic checks and DCQL matching. In particular, SD-JWT issuer signatures, disclosure digests, key binding, `sd_hash`, `nonce` and `aud` must be verified by the responsible cryptographic component; the DCQL matcher must only process **verified** disclosed claims. An HTTP 200 from a verifier dependency alone does not establish validity.
+
+## Holder workflow
+
+The holder accepts a complete OID4VP Authorization URL or an equivalent trusted integration request. Both human and machine flows use the same request validation, credential lookup and fulfillment core. The immutable `consentMode` selects the decision path.
+
+```mermaid
+flowchart TD
+    A["OID4VP Authorization Request"] --> B["HTTP intake / Web Wallet"]
+    A --> C["NATS intake / Machine holder"]
+    B --> D["Authenticate and validate Request Object"]
+    C --> D
+    D --> E[("Cassandra: tenant and group scope")]
+    E --> F{"Consent mode"}
+    F -->|manual| G["Web Wallet: inspect and approve"]
+    F -->|auto| H["Policy Client: decide selection"]
+    G --> I{"Approved?"}
+    H --> I
+    I -->|No| R["Mark rejected"]
+    I -->|Yes| J["Validate selection against stored DCQL"]
+    J --> K["Load credentials and create VP token"]
+    K --> L["Send direct_post or direct_post.jwt"]
+    L --> M["External verifier"]
+```
+
+### Intake and persistence
+
+- **Manual:** HTTP presentation creation through the Holder API, normally initiated by a Web Wallet.
+- **Automatic:** NATS CloudEvent of type `verifier.presentation.authorization.remote`, with `consentMode: "auto"`, from an authorized machine client.
+- **Shared:** Store `presentationId`, `tenantId`, `groupId`, `namespace`, `group`, `consentMode`, `status`, `dcqlQuery`, `clientId` and expiration in Cassandra.
+
+The document describes statuses `pending`, `processing`, `completed`, `rejected`, `failed`, and `blocked`. Rejected requests are removed from the pending inbox but retained until their TTL expires. Atomic transitions must prevent duplicate fulfillment; TTL must survive status updates.
+
+The external OID4VP `state` is distinct from the internal database status. Where present, it is persisted separately as `AuthorizationState` and returned unchanged to the external verifier. The document identifies migration `V003__add_authorization_state.cql`.
+
+## Consent and selection
+
+### Manual consent
+
+The Web Wallet lists pending requests, displays the verifier and DCQL requirements, obtains matching credential candidates, and lets the holder approve, reject or block a verifier. The service must validate selections against the original DCQL snapshot and account ownership before signing.
+
+### Automatic consent
+
+The Policy Client receives tenant, group, verifier, DCQL and candidate credential identifiers. It must return an **explicit** decision. Approval without a valid selection fails closed.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Holder as Holder service
     participant Storage as Credential Storage
-    participant Policy as Policy Service
-    participant Signer as Crypto Provider / Signer
-    participant V as External Verifier
-    App->>CVS: POST /internal/proofs/proof/{state}/fulfill (signing identity)
-    CVS->>DB: Load stored external Request Object / DCQL
-    CVS->>DB: CAS requested -> fulfilling
-    CVS->>Storage: POST DCQL /v1/tenants/{tenant}/storage/{region}/{country}/{account}/credentials
-    Storage-->>CVS: FilterResult groups
-    CVS->>Policy: tenant, clientId, DCQL, candidates
-    Policy-->>CVS: allow + selection per query ID / credential key
-    alt denied or no matches
-        CVS-->>App: error, no presentation sent
-    else allowed
-        loop each selected DCQL query
-            CVS->>Signer: POST /v1/presentation/proof (format, aud, nonce, credential)
-            Signer-->>CVS: signed ldp_vc VP or dc+sd-jwt presentation
-        end
-        CVS->>CVS: VPToken.ValidateAgainst(persisted DCQL)
-        CVS->>V: POST response_uri (vp_token, original external state)
-        Note over CVS,V: Redirects forbidden; HTTPS outside dev
-        V-->>CVS: HTTP 2xx
-        CVS->>DB: status = presentation-transmitted
-        CVS-->>App: success
+    participant Policy as Selection Policy Client
+    participant DB as Cassandra
+    participant Fulfill as Shared fulfillment
+    Holder->>Storage: Resolve DCQL candidates
+    Storage-->>Holder: Query IDs and credential IDs
+    Holder->>Policy: POST context, DCQL and candidates
+    alt Policy denies
+        Policy-->>Holder: approved=false
+        Holder->>DB: pending to rejected
+    else Policy approves
+        Policy-->>Holder: approved=true, selections
+        Holder->>Holder: Validate selections and disclosures
+        Holder->>Fulfill: FulfillSelected
+        Fulfill-->>Holder: Success or error
     end
 ```
 
-### Transaction state and external OID4VP state
+Example policy input:
 
-`VerificationEntry.State` remains the internal database **status**. The
-external verifier's optional OID4VP `state` is stored separately in
-`VerificationEntry.AuthorizationState` (Cassandra migration
-`V003__add_authorization_state.cql`) and is returned **unchanged** in the
-`direct_post` response. An absent external state is not fabricated. The
-fulfillment path acquires a Cassandra conditional update
-`presentation-requested -> presentation-fulfilling` to reject concurrent
-submissions. On failure before transmission it releases the claim; after a
-successful network submission it never automatically retries, to avoid
-releasing the same credentials twice. A durable outbox would be required for
-exactly-once recovery across process crashes.
-
-### Format-specific signing
-
-The Crypto Provider's `/v1/presentation/proof` endpoint is used for both
-`ldp_vc` and `dc+sd-jwt`. For SD-JWT the service passes the original compact
-SD-JWT, `format: dc+sd-jwt`, stored `nonce`, `aud: clientId`, and holder signing
-identity; the Signer creates the key-bound SD-JWT presentation. For LDP VC,
-the service constructs a JSON-LD VP and asks the Signer for its proof.
-Unsupported formats fail closed. Manual legacy proof submission cannot create
-SD-JWT presentations without the persisted transaction audience/nonce.
-
-### Configuration and later Tenant Service
-
-```yaml
-isDev: false
-country: DE
-region: EU
-externalPresentation:
-  credentialSelectionPolicy: http://policy-service:8080/policy/credential-selection
+```json
+{
+  "tenantId": "demo-tenant",
+  "groupId": "demo-account",
+  "clientId": "decentralized_identifier:did:web:verifier.example",
+  "dcqlQuery": {
+    "credentials": [
+      {
+        "id": "identity",
+        "format": "dc+sd-jwt",
+        "meta": { "vct_values": ["https://issuer.example/types/identity"] },
+        "claims": [{ "path": ["given_name"] }]
+      }
+    ]
+  },
+  "credentials": [{ "queryId": "identity", "credentialId": "credential-123" }]
+}
 ```
 
-`country` and `region` deliberately remain **static service settings**. The
-Storage adapter consumes these fields when constructing the retrieval path.
-A future Tenant Service should resolve them from `tenantId` there; it must not
-change DCQL, signer or external Request Object semantics.
+Example approval:
 
-### Swagger, Insomnia, Playground
+```json
+{
+  "approved": true,
+  "selections": [
+    {
+      "queryId": "identity",
+      "credentialId": "credential-123",
+      "disclosures": ["given_name"]
+    }
+  ]
+}
+```
 
-- `docs/swagger.json`, `docs/swagger.yaml`, `docs/docs.go` describe the
-  tenant-scoped routes and `/fulfill`.
-- `docs/Insomnia_OID4VP_2026.json` replaces the legacy Presentation Exchange
-  collection; it includes direct-post, Request Object, authorization, internal
-  proof and fulfillment routes.
-- Docker playground includes Holder Fulfillment and tenant-qualified URLs;
-  its HTTP client does not follow redirects.
+To deny: `{"approved": false}`. For `ldp_vc`, omit `disclosures`. **Do not send `claimIds` to the documented current approval API**: an older architecture draft uses that field, but the later operator guide explicitly says it is rejected. Use `disclosures` where supported. Required claims must actually be disclosed; do not assume that DCQL matching implies consent.
 
-**Deployment caution:** A complete Go 1.25 build, signer integration tests,
-Cassandra migration test, and an end-to-end test with a trusted external
-verifier are still required before production rollout. The existing manual
-proof route is retained for compatibility and should be restricted to
-privileged internal callers.
-
-
-The Credential Verification Service implements the verifier-facing and holder-facing OID4VP flows used by the XFSC OCM stack. It supports OID4VP 1.0/DCQL through `oid4-vci-vp-library v1.9.2` and integrates with Credential Storage, Crypto Provider/Signer, Cassandra and NATS.
-
-> **Terminology:** this service uses **DCQL**. `presentation_definition` / Presentation Exchange is legacy terminology and is not part of the current OID4VP flow described here.
-
-## Responsibilities and trust boundaries
-
-The service has two different protocol roles. Keeping them separate is essential:
-
-- **Verifier role (outbound request):** an internal trusted application supplies an already-authorized DCQL query. The service creates a transaction and OID4VP Authorization Request. A wallet selects credentials and sends a `vp_token` back.
-- **Holder role (inbound external request):** an external verifier supplies an OID4VP Authorization Request. The service stores its DCQL query as a transaction snapshot. After the local application authorizes disclosure, the service resolves matching credentials from Credential Storage, creates/signs the presentation and sends it to the external verifier's `response_uri`.
-
-DCQL templates and business policy are intentionally **external concerns**. This service consumes a concrete DCQL query and stores the exact query with the transaction.
+### Shared fulfillment
 
 ```mermaid
-flowchart LR
-    App[Trusted application] -->|DCQL / create request| CVS[Credential Verification Service]
-    CVS -->|request_uri + Authorization Request| Wallet[External wallet]
-    Wallet -->|direct_post vp_token| CVS
-    CVS -->|verify presentation| Crypto[Crypto Provider / Signer]
-    CVS -->|store result event| Storage[Credential Storage]
-
-    ExtVerifier[External verifier] -->|Authorization Request| CVS
-    CVS -->|DCQL lookup after consent| Storage
-    Storage -->|FilterResult groups| CVS
-    CVS -->|sign VP| Crypto
-    CVS -->|direct_post vp_token| ExtVerifier
-
-    CVS --> Cassandra[(Cassandra)]
-    CVS <--> NATS[(NATS)]
+flowchart TD
+    A["Approved selection"] --> B["Load stored request and DCQL snapshot"]
+    B --> C["Validate credential IDs and disclosure selection"]
+    C --> D["Load selected credentials"]
+    D --> E["Generate and sign VP token"]
+    E --> F["Build OID4VP Authorization Response"]
+    F --> G{"Response mode"}
+    G -->|direct_post| H["Form POST: vp_token and state"]
+    G -->|direct_post.jwt| I["Encrypt response JWE and POST response field"]
+    H --> J["External verifier"]
+    I --> J
 ```
+
+For SD-JWT, the Crypto Provider receives the compact credential, expected `nonce` and audience (`clientId`) and produces a key-bound presentation. For LDP VC, the service builds a JSON-LD VP and delegates proof generation. Unsupported formats fail closed.
+
+Holder **outgoing** response modes: `direct_post` and encrypted `direct_post.jwt` for supported credential formats. The documented `direct_post.jwt` implementation requires verifier metadata with an ECDH-ES / P-256 encryption JWK and supports `A128GCM` or `A256GCM`. The Request Object signature verification key is **not** interchangeable with the response encryption key in `client_metadata.jwks`.
+
+## HTTP and NATS interfaces
+
+All routes below are documented relative to the deployed tenant prefix, generally `/v1/tenants/{tenantId}`. Some earlier snippets show `/v1/{tenantId}`; use the actual router/gateway configuration as the source of truth.
+
+| Role | Method | Route suffix | Purpose |
+| --- | --- | --- | --- |
+| Verifier | `GET` | `/presentation/request` | Legacy/alternative HTTP request creation |
+| Verifier | `GET` | `/presentation/proof/{state}/request-object/request.jwt` | Serve signed Request Object |
+| Verifier | `POST` | `/presentation/proof/{state}` | Receive `direct_post` |
+| Verifier internal | `GET` | `/internal/presentations` | List verified presentation metadata |
+| Verifier internal | `GET` | `/internal/presentations/{state}` | Retrieve verified presentation |
+| Holder | `POST` | `/api/presentation/presentations` | Create holder request |
+| Holder | `GET` | `/api/presentation/presentations` | Pending inbox |
+| Holder | `GET` | `/api/presentation/presentations/{presentationId}` | Request details |
+| Holder | `GET` | `/api/presentation/presentations/{presentationId}/candidates` | Matching credentials |
+| Holder | `POST` | `/api/presentation/presentations/{presentationId}/approve` | Approve and transmit |
+| Holder | `POST` | `/api/presentation/presentations/{presentationId}/reject` | Reject request |
+| Profile admin | `GET/PUT/DELETE` | `/internal/presentation-profiles...` | Manage OID4VP profiles |
+
+**Legacy:** `POST /internal/proofs/proof/{state}/fulfill` was removed in the later architecture. Older text that recommends this route is obsolete. The low-level `POST /internal/proofs/proof/{state}` is a separate legacy proof API, not a consent endpoint.
+
+### NATS event types
+
+| Type | Purpose |
+| --- | --- |
+| `verifier.presentation.authorization` | Create a verifier-side request |
+| `verifier.presentation.authorization.remote` | Ingest an external request for the holder |
+| `verifier.presentation.result.get` | Retrieve a locally verified presentation |
+| `verifier.presentation.result.reply` | Result retrieval response |
+
+The **CloudEvent `type` is not necessarily the NATS subject**. Configure subjects independently and use broker ACLs. A CloudEvent must include `specversion`, `id`, `source`, and `type`; a missing `source` makes the event invalid.
+
+See [Operator guide](docs/OPERATOR_GUIDE.md) for request/reply payloads, curl examples and test scripts.
 
 ## Configuration
 
-The service is built with Go 1.25 and currently uses, among others:
-
-- `oid4-vci-vp-library v1.9.2`
-- `credential-storage-service v1.3.0`
-- `crypto-provider-service/v2 v2.3.7`
-- `microservice-core-go v1.1.2`
-
-Important configuration values are:
+Representative service settings from the supplied documentation:
 
 ```yaml
+isDev: false
 country: DE
 region: EU
 storageServiceUrl: http://credential-storage-service:8080
 signerService:
   presentationSignUrl: http://signer:8080/v1/presentation/proof
   presentationVerifyUrl: http://signer:8080/v1/presentation/verify
+externalPresentation:
+  credentialSelectionPolicy: http://policy-service:8080/policy/credential-selection
 ```
 
-`country` and `region` are **temporarily static service configuration**. Credential Storage v1.3.0 addresses credentials by tenant, region, country and account. The holder flow isolates this dependency in the Storage resolver. A future Tenant Service should resolve `country` and `region` from `tenantId`; the OID4VP and DCQL flow does not need to change.
+The actual configuration schema may differ by revision. In particular, the documented environment variables include:
 
-The HTTP base URL of Credential Storage is configured with:
+| Variable | Purpose |
+| --- | --- |
+| `CREDENTIALVERIFICATION_STORAGE_URL` | Credential Storage HTTP base URL |
+| `CREDENTIALVERIFICATION_STORAGE_TOPIC` | Storage event subject/topic; **not** the HTTP URL |
+| `CREDENTIALVERIFICATION_PROFILE_ADMIN_JWKS_URL` | Enables profile-admin JWT verification when nonempty |
+| `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL` | **Legacy** external presentation-policy lookup; superseded by profiles |
 
-```text
-CREDENTIALVERIFICATION_STORAGE_URL
-```
+`country` and `region` are currently described as static settings used to build Storage paths. A future Tenant Service could resolve them by tenant without changing OID4VP semantics.
 
-The NATS storage topic remains separate:
+## Security
 
-```text
-CREDENTIALVERIFICATION_STORAGE_TOPIC
-```
+1. **Authenticate external Request Objects.** The later security section documents DID-bound signature verification via `ssi-jwt/v2`, binding outer `client_id`, signed `client_id`, optional `iss` and DID `kid`. Reject attacker-supplied `jwk`, `jku` and `x5u` as trust anchors. Non-DID client identifier methods are not supported by that implementation. Earlier text claiming `ParseUnverified` is sufficient is obsolete and unsafe.
+2. **Treat DID key control and verifier authorization separately.** A valid signature does not imply permission to request credentials. Apply client/request policy and consent.
+3. **Constrain outbound URLs.** In production use HTTPS for external `request_uri`/`response_uri`; reject loopback/private/link-local targets, unsafe DNS resolutions and redirects. Do not forward inbound bearer tokens or cookies to external URLs. The supplied documentation specifies bounded responses and 10-second HTTP timeouts.
+4. **Enforce tenant and holder isolation.** The gateway must authenticate users and replace untrusted `x-tenantid`, `x-groupid`, `x-namespace` and `x-group` headers. `groupId` is the holder account; `group` is the Crypto Provider key group. They are not interchangeable.
+5. **Enforce one-time fulfillment.** Use atomic status transitions and immutable consent mode, holder context, nonce and DCQL snapshot. After a successful network submission, automatic retry risks duplicate disclosure; exactly-once recovery requires a durable outbox.
+6. **Verify credentials before DCQL matching.** Only cryptographically validated SD-JWT disclosures may be matched. Validate issuer signature, disclosure integrity, KB-JWT holder binding, `sd_hash`, audience and nonce as applicable.
+7. **Protect internal interfaces.** Restrict `/internal/**` at the gateway and apply NATS subject ACLs. A signed state is not a replacement for authorization.
 
-`STORAGE_URL` is for credential **retrieval/DCQL matching** over HTTP. `STORAGE_TOPIC` is for storage events.
+### Profile administration JWT
 
-## Scenario 1 — Internal creation of an OID4VP request (verifier role)
+When enabled, the profile-admin middleware requires a signed bearer token with expiration, matching tenant/group and configured scope. Set issuer/audience and secure the JWKS source. The supplied documentation describes a five-minute JWKS cache. When disabled, these endpoints must not be publicly reachable.
 
-A trusted internal service has already selected/authorized a concrete DCQL query. It requests a presentation through NATS (`verifier.presentation.authorization`). The Verification Service persists the DCQL snapshot and creates an OID4VP request URI.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Internal application
-    participant NATS
-    participant CVS as Verification Service
-    participant DB as Cassandra
-    participant Signer as Crypto Provider / Signer
-    participant Wallet
-
-    App->>NATS: verifier.presentation.authorization + DCQL
-    NATS->>CVS: creation request
-    CVS->>CVS: DCQL.Validate()
-    CVS->>DB: store transaction + DCQL snapshot + nonce
-    CVS-->>App: presentation_id + authorization/request URI
-    Wallet->>CVS: GET request_uri
-    CVS->>DB: load transaction snapshot
-    CVS->>Signer: sign Authorization Request JWT
-    Signer-->>CVS: signed Request Object
-    CVS-->>Wallet: application/jwt
-    Wallet->>Wallet: select credentials matching DCQL
-    Wallet->>CVS: direct_post vp_token + state
-    CVS->>CVS: state + DCQL ValidateAgainst
-    CVS->>Signer: verify presentations/credentials
-    CVS->>DB: store verification state/result
-```
-
-The wallet-facing `request_uri` does **not** generate or modify DCQL. It serializes the DCQL snapshot already stored for the transaction.
-
-## Scenario 2 — Wallet-facing request_uri and direct_post
-
-The externally visible protocol endpoints are tenant-scoped by `microservice-core-go` under `/v1/tenants/{tenantId}`.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Wallet
-    participant CVS as Verification Service
-    participant DB as Cassandra
-    participant Signer
-
-    Wallet->>CVS: GET /presentation/proof/{state}/request-object/request.jwt
-    CVS->>DB: resolve HMAC state -> groupId/requestId
-    CVS->>Signer: sign Authorization Request
-    Signer-->>CVS: JWT
-    CVS-->>Wallet: application/jwt (raw compact JWT)
-    Wallet->>CVS: POST /presentation/proof/{state}<br/>vp_token + state
-    CVS->>DB: load persisted DCQL + nonce
-    CVS->>CVS: ValidateAgainst(DCQL)
-    CVS->>Signer: cryptographic verification
-    CVS-->>Wallet: protocol response
-```
-
-The JWT response is returned as raw `application/jwt`; it is not JSON-quoted.
-
-## Scenario 3 — External Authorization Request through HTTP (holder role)
-
-A permitted external application/verifier can start the holder flow through the authorization endpoint. The service fetches the external `request_uri`, validates the OID4VP request structure and policies, stores the request/DCQL snapshot and redirects to the configured local authorization UI/application.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Verifier as External verifier/application
-    participant CVS as Verification Service
-    participant Policy as Policy service (optional)
-    participant DB as Cassandra
-    participant UI as Local authorization UI
-
-    Verifier->>CVS: GET /presentation/authorize?client_id=...&request_uri=...
-    opt client policy configured
-        CVS->>Policy: authorize client_id
-        Policy-->>CVS: allow/deny
-    end
-    CVS->>Verifier: GET request_uri
-    Verifier-->>CVS: application/jwt
-    CVS->>CVS: parse request + OID4VP Validate()
-    opt request-object policy configured
-        CVS->>Policy: authorize Request Object
-        Policy-->>CVS: allow/deny
-    end
-    CVS->>DB: store DCQL snapshot, nonce, response_uri, client_id
-    CVS-->>Verifier: 302 local authorization URL + presentation state
-    Note over CVS,UI: Redirect target is the local consent/application step,
-    Note over CVS,UI: not the external verifier's direct_post endpoint.
-```
-
-Headers currently used to bind the local account/transaction are `x-groupId` (storage account), `x-requestId`, and holder signing metadata as required by the surrounding application.
-
-## Scenario 4 — External Authorization Request through NATS
-
-The same inbound request can enter through NATS (`verifier.presentation.authorization.remote`). This is a transport alternative; it is not a different OID4VP protocol.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant App as Internal integration
-    participant NATS
-    participant CVS as Verification Service
-    participant Verifier as External verifier
-    participant DB as Cassandra
-
-    App->>NATS: verifier.presentation.authorization.remote
-    NATS->>CVS: client_id + request_uri + tenant/group/request
-    CVS->>Verifier: GET request_uri
-    Verifier-->>CVS: signed Request Object
-    CVS->>CVS: structural/policy validation
-    CVS->>DB: persist external request + DCQL snapshot
-    CVS-->>NATS: remote authorization reply
-    NATS-->>App: request accepted
-```
-
-The actual credential disclosure is a separate fulfillment step. This prevents receipt of an Authorization Request from automatically consenting to credential disclosure.
-
-## Scenario 5 — Fulfill an external request from Credential Storage
-
-**The old `POST /internal/proofs/proof/{state}/fulfill` endpoint was removed.**
-It bypassed the consent selection contract and could not carry SD-JWT disclosures.
-For manual approval use the Holder API `POST /api/presentation/presentations/{presentationId}/approve`.
-For machine approval send the NATS `verifier.presentation.authorization.remote` request with `consentMode=auto`.
-Both use `FulfillSelected`, DCQL validation, the same signer and the same `direct_post`/`direct_post.jwt` submission code.
-
-### Storage contract
-
-The implementation follows the uploaded Credential Storage Service v1.3.0 DIRECT-mode API:
-
-```text
-POST {STORAGE_URL}/v1/tenants/{tenantId}/storage/{region}/{country}/{account}/credentials
-Content-Type: application/json
-Body: DCQLQuery
-```
-
-The Storage Service decrypts the account credentials and evaluates `DCQLQuery.Filter(...)`. The relevant response field is:
-
-```json
-{
-  "groups": [
-    {
-      "id": "<dcql credential query id>",
-      "credentials": {}
-    }
-  ]
-}
-```
-
-In the current Verification Service deployment `groupId` is used as the Storage `account`. This is also the identifier used for the service's account partitioning.
-
-## Manual/legacy proof endpoint
-
-The low-level internal `ProofModel.Payload` endpoint is retained only for legacy non-consent workflows. It is **not** a manual or machine consent API; use the Holder approval endpoint below.
-
-```text
-POST /v1/tenants/{tenantId}/internal/proofs/proof/{state}
-```
-
-New integrations should prefer `/fulfill`, because `/fulfill` derives credentials from the persisted DCQL query and Credential Storage rather than trusting credential groups supplied by the caller.
-
-## State, nonce and DCQL snapshot
-
-Each transaction stores the concrete DCQL query. This is intentional: template/policy configuration can change while a transaction is active, but the eventual `vp_token` must be checked against the exact request the holder received.
-
-```mermaid
-flowchart TD
-    Template[External DCQL template/policy] --> Query[Concrete DCQLQuery]
-    Query --> Snapshot[(Transaction DCQL snapshot)]
-    Snapshot --> Request[OID4VP Authorization Request]
-    Snapshot --> StorageMatch[Credential Storage matching]
-    Snapshot --> FinalValidation[VPToken.ValidateAgainst]
-    Request --> Wallet[Holder / Wallet]
-    StorageMatch --> VP[VP Token]
-    VP --> FinalValidation
-```
-
-The route state is HMAC protected and resolves to `groupId + requestId`. The nonce is persisted with the transaction and used for presentation verification.
-
-## Country/region and future Tenant Service
-
-Today:
-
-```mermaid
-flowchart LR
-    Config[Static service config] --> Country[country]
-    Config --> Region[region]
-    Tenant[tenantId] --> Resolver[Storage resolver]
-    Country --> Resolver
-    Region --> Resolver
-    Resolver --> Storage[Credential Storage]
-```
-
-Later, only this part should change:
-
-```mermaid
-flowchart LR
-    Tenant[tenantId] --> TenantService[Tenant Service]
-    TenantService --> Meta[country + region]
-    Meta --> Resolver[Storage resolver]
-    Resolver --> Storage[Credential Storage]
-```
-
-Do not move DCQL templates into this Tenant Service implicitly. DCQL management remains an external policy/template concern unless that architecture is changed explicitly.
-
-## Security: external Request Object verification
-
-The inbound external flow currently parses the compact JWT in order to obtain the OID4VP request claims and then applies OID4VP structural validation and configured policies. **Cryptographic Request Object signature verification against trusted client key material is still a required production hardening step.** Parsing a JWT with `ParseUnverified` is not proof of authenticity and no claim obtained from that parsing should be treated as authenticated solely because parsing succeeded.
-
-The intended final sequence is:
-
-```mermaid
-sequenceDiagram
-    participant CVS as Verification Service
-    participant Verifier as External verifier
-    participant Resolver as DID/JWK resolver
-
-    CVS->>Verifier: GET request_uri
-    Verifier-->>CVS: compact signed JWT
-    CVS->>CVS: inspect protected header (kid/alg)
-    CVS->>Resolver: resolve trusted verification key
-    Resolver-->>CVS: key material
-    CVS->>CVS: verify JWT signature + claims
-    CVS->>CVS: AuthorizationRequest.Validate()
-    CVS->>CVS: apply client/request policies
-```
-
-Until that resolver/verification path is implemented, deployments must not treat arbitrary Internet `request_uri` values as authenticated request objects merely because their JWT can be decoded.
-
-## Dependency interaction summary
-
-| Dependency | Purpose |
-|---|---|
-| Cassandra | transaction state, nonce, DCQL snapshot and received/sent presentation state |
-| Credential Storage Service | credential retrieval and DCQL matching for holder-side fulfillment; presentation/result storage events |
-| Crypto Provider / Signer | sign generated presentations and verify received presentations/credentials; sign verifier Request Objects through the signer messaging flow |
-| NATS | internal request creation, inbound integration and notifications |
-| External policy endpoint | optional client/request authorization |
-| Future Tenant Service | resolve tenant-dependent country/region (planned, not currently required) |
-
-## Build and validation
-
-The module declares Go 1.25.0. Run in an environment with Go 1.25 available:
+## Testing and operations
 
 ```bash
 go test ./...
 go vet ./...
 ```
 
-For an end-to-end holder test, run Credential Storage in **DIRECT** mode, seed credentials for the same tenant/region/country/account (`groupId`), submit an external Authorization Request containing DCQL, authorize it locally, then invoke `/fulfill` and verify that the external verifier receives `vp_token` via `direct_post`.
-
-**Known limitation:** Only DID-based external verifier identities are supported. Other OID4VP client identifier methods require their own resolvers. HTTP `authUrl` overrides are permitted only in dev mode.
-
-
-## External Request Object verification (DID profile)
-
-The holder resolves `request_uri` without redirects and passes the **outer** `client_id` into the verifier. The compact JWS header and payload are decoded as **untrusted** input only to select a DID verification method. The `kid` must refer to that same DID, and embedded/remote attacker-selected key sources (`jwk`, `jku`, `x5u`) are rejected. `ssi-jwt/v2.Parse` resolves the DID key and verifies the signature. The verified `client_id` must equal the outer `client_id`; `iss`, when present, must also match. Only after verification does OID4VP request validation and the policy/consent path run.
-
-**Scope:** This implementation supports DID-based verifier identities only. X.509, verifier attestation and other client identifier methods require separate resolvers and currently fail closed. A DID signature proves key control, not that a verifier is authorized to receive credentials; policy must still decide. DID resolution must be restricted to trusted resolver methods and egress rules in production.
-
-## `direct_post` and `direct_post.jwt`
-
-The Holder flow treats presentation format and Authorization Response mode as independent protocol dimensions.
-
-| DCQL credential format | `direct_post` | `direct_post.jwt` |
-| --- | --- | --- |
-| `dc+sd-jwt` | supported | supported |
-| `ldp_vc` | supported | supported |
-
-For `direct_post`, the service posts `vp_token` and the external `state` as `application/x-www-form-urlencoded` fields.
-
-For `direct_post.jwt`, the service builds the same OID4VP `AuthorizationResponse`, encrypts it as a compact JWE, and posts it in the single `response` form field. The current response encryptor supports Verifier metadata containing an `ECDH-ES` / `P-256` encryption JWK and selects `A128GCM` (preferred/default) or `A256GCM` from `encrypted_response_enc_values_supported`. The authenticated Request Object's `client_metadata` is persisted with the presentation transaction so the encryption key remains available after consent and credential selection.
-
-The Request Object signature key and the Authorization Response encryption key have different purposes. A DID verification method (`kid` in the Request Object JWS) authenticates the Request Object. `client_metadata.jwks` supplies the Verifier's response-encryption key and is never used as a replacement for Request Object signature verification.
-
-A request using an unsupported response mode, encryption key type, key agreement algorithm, or content-encryption algorithm fails closed. Credential format selection remains in the presentation builder and is not inferred from `response_mode`.
-
-OID4VP Holder Architecture
-
-The XFSC Holder supports both human-operated wallets and machine-to-machine (M2M) presentations.
-
-Both workflows share the same OID4VP request validation, persistent storage, credential matching, and presentation fulfillment logic. The consent process differs depending on the mode assigned when the authorization request is submitted.
-
-Architecture Overview
-
-flowchart TD
-    A["OID4VP Authorization Request"]
-    A --> B["HTTP Intake<br/>Web Wallet"]
-    A --> C["NATS Intake<br/>Machine Holder"]
-    B --> D["Validate Authorization Request"]
-    C --> D
-    D --> E[("Presentation Request Store<br/>tenantId + groupId")]
-    E --> F{"Consent Mode"}
-    F -->|manual| G["Web Wallet<br/>Presentation Inbox"]
-    F -->|auto| H["Policy Client"]
-    G --> I{"User Decision"}
-    I -->|Approve| J["PresentationSelection"]
-    I -->|Reject| K["Status: rejected"]
-    H -->|"DCQL + Credential IDs"| L{"Policy Decision"}
-    L -->|Approved| J
-    L -->|Rejected| K
-    J --> M["Shared Fulfillment"]
-    M --> N["Validate DCQL Selection"]
-    N --> O["Generate VP Token"]
-    O --> P["Send OID4VP Response"]
-    P --> Q["Verifier"]
-    K --> R["Remove from Pending Inbox"]
-    style A fill:#e3f2fd,stroke:#1565c0
-    style E fill:#fff3e0,stroke:#ef6c00
-    style F fill:#f3e5f5,stroke:#7b1fa2
-    style G fill:#e8f5e9,stroke:#2e7d32
-    style H fill:#e8f5e9,stroke:#2e7d32
-    style J fill:#e8f5e9,stroke:#2e7d32
-    style K fill:#ffebee,stroke:#c62828
-    style M fill:#e3f2fd,stroke:#1565c0
-    style Q fill:#e3f2fd,stroke:#1565c0
-
-1. Authorization Request Intake
-
-OID4VP authorization requests can enter the Holder Service through two interfaces.
-
-HTTP Intake (Web Wallet)
-
-A human holder submits an OID4VP authorization URL through the Web Wallet.
-
-The request is validated and stored with consentMode=manual.
-
-NATS Intake (Machine Holder)
-
-A machine agent submits an OID4VP authorization URL using a NATS CloudEvent.
-
-The request is validated and stored with consentMode=auto.
-
-Both interfaces use the same internal request-processing logic.
-
-2. Presentation Request Storage
-
-Validated requests are stored in Cassandra and associated with their respective tenantId and groupId.
-
-Each request contains:
-
-Field	Description
-presentationId	Unique internal presentation request identifier
-tenantId	Tenant identifier
-groupId	Holder account identifier
-consentMode	manual or auto
-status	Current processing status
-dcqlQuery	Original DCQL query
-clientId	Verified verifier identifier
-namespace	Cryptographic key namespace
-group	Cryptographic key group
-
-The consent mode is assigned during request creation and cannot be changed afterward.
-
-Cassandra TTL automatically removes expired presentation requests.
-
-Supported statuses:
-
-* pending
-* processing
-* completed
-* rejected
-* failed
-* blocked
-
-3. Manual Consent — Human Holder
-
-Requests with consentMode=manual are made available through the Web Wallet.
-
-The wallet retrieves pending requests for the current tenantId and groupId.
-
-The holder can:
-
-1. View incoming presentation requests.
-2. Inspect the verifier and requested credentials.
-3. Retrieve matching credentials and valid DCQL combinations.
-4. Select credentials and permitted claims.
-5. Approve or reject individual requests.
-6. Block unwanted verifiers.
-
-Approval
-
-The wallet submits a PresentationSelection containing the selected credentials and claims.
-
-The Holder Service validates the selection against the original DCQL query and initiates presentation fulfillment.
-
-Rejection
-
-The request status changes to rejected.
-
-Rejected requests disappear from the pending inbox and cannot subsequently be approved.
-
-4. Automatic Consent — Machine Holder
-
-Requests with consentMode=auto are processed without user interaction.
-
-The Holder Service:
-
-1. Retrieves matching credentials from Credential Storage.
-2. Sends the original DCQL query, available credential IDs, and holder context to the Policy Client.
-3. Receives a PresentationSelection or rejection.
-4. Validates the returned selection.
-5. Initiates presentation fulfillment.
-
-The Policy Client is responsible for the automatic consent decision.
-
-The Holder Service does not implement a separate consent rule engine.
-
-5. PresentationSelection
-
-Both consent modes produce the same selection structure.
-
-{
-  "presentationId": "presentation-123",
-  "approved": true,
-  "selections": [
-    {
-      "queryId": "identity",
-      "credentialId": "credential-123",
-      "claimIds": [
-        "given_name",
-        "family_name"
-      ]
-    }
-  ]
-}
-
-Field	Description
-presentationId	Reference to the stored authorization request
-approved	Consent decision
-queryId	Credential query identifier from DCQL
-credentialId	Selected credential identifier from storage
-claimIds	Selected DCQL claim identifiers
-
-The Holder Service validates the selection against the stored authorization request before generating the presentation.
-
-6. Shared Presentation Fulfillment
-
-Manual and automatic consent use the same fulfillment pipeline.
-
-PresentationSelection
-        |
-        v
-Load Stored Authorization Request
-        |
-        v
-Validate Credential Selection against DCQL
-        |
-        v
-Load Selected Credentials
-        |
-        v
-Generate and Sign VP Token
-        |
-        v
-Build OID4VP Authorization Response
-        |
-        v
-Send Response to Verifier
-
-The fulfillment process supports the applicable OID4VP response mode, including direct_post and direct_post.jwt.
-
-The verifier receives the VP Token according to the original authorization request.
-
-7. Security and Isolation
-
-The Holder Service uses the following context:
-
-Parameter	Purpose
-tenantId	Tenant isolation
-groupId	Holder account isolation
-namespace	Crypto Provider key namespace
-group	Crypto Provider key group
-
-The context is provided by the surrounding XFSC infrastructure.
-
-The service does not implement its own authentication or account management.
-
-The following rules apply:
-
-* Consent mode cannot be modified after request creation.
-* Manual consent cannot approve an automatic request.
-* Automatic consent cannot process a manual request.
-* Credential selections must satisfy the original DCQL query.
-* Only credentials belonging to the corresponding holder context may be presented.
-* Requests can only be fulfilled once.
-* Blocked verifiers cannot create new actionable presentation requests.
-* Rejected requests cannot be approved later.
-* Cassandra TTL controls request retention.
-
-8. Design Principles
-
-The architecture follows four principles:
-
-Transport independence: HTTP and NATS use the same request-processing core.
-
-Consent separation: Human consent is managed by the Web Wallet; machine consent is delegated to the Policy Client.
-
-Immutable request context: Consent mode and holder context are persisted when the request is created.
-
-Shared fulfillment: All approved requests use the same DCQL validation, credential loading, VP generation, and OID4VP response pipeline.
-
-# OID4VP Holder Architecture
-
-The XFSC Holder supports **human-operated wallets** and **machine-to-machine (M2M) presentations**. Both flows share authorization request validation, storage, credential matching, and presentation fulfillment. Consent is determined by the immutable `consentMode` assigned at intake.
-
-## Architecture Overview
-
-```mermaid
-flowchart TD
-    A["OID4VP Authorization Request"]
-    A --> B["HTTP Intake<br/>Web Wallet"]
-    A --> C["NATS Intake<br/>Machine Holder"]
-    B --> D["Validate Authorization Request"]
-    C --> D
-    D --> E[("Presentation Request Store<br/>tenantId + groupId")]
-    E --> F{"Consent Mode"}
-    F -->|manual| G["Web Wallet<br/>Presentation Inbox"]
-    F -->|auto| H["Policy Client"]
-    G --> I{"User Decision"}
-    I -->|Approve| J["PresentationSelection"]
-    I -->|Reject| K["Status: rejected"]
-    H -->|"DCQL + Credential IDs"| L{"Policy Decision"}
-    L -->|Approved| J
-    L -->|Rejected| K
-    J --> M["Shared Fulfillment"]
-    M --> N["Validate DCQL Selection"]
-    N --> O["Generate VP Token"]
-    O --> P["Send OID4VP Response"]
-    P --> Q["Verifier"]
-    K --> R["Remove from Pending Inbox"]
-
-    style A fill:#e3f2fd,stroke:#1565c0
-    style E fill:#fff3e0,stroke:#ef6c00
-    style F fill:#f3e5f5,stroke:#7b1fa2
-    style G fill:#e8f5e9,stroke:#2e7d32
-    style H fill:#e8f5e9,stroke:#2e7d32
-    style J fill:#e8f5e9,stroke:#2e7d32
-    style K fill:#ffebee,stroke:#c62828
-    style M fill:#e3f2fd,stroke:#1565c0
-    style Q fill:#e3f2fd,stroke:#1565c0
-```
-
-## 1. Authorization Request Intake
-
-### HTTP Intake — Human Holder
-
-The Web Wallet submits a complete OID4VP authorization URL via HTTP. The service validates the request and stores it with `consentMode=manual`.
-
-The HTTP API follows the microservice routing convention:
-
-```http
-POST /v1/{tenantId}/api/presentation/presentations
-```
-
-The surrounding infrastructure supplies the context through the route and headers (`x-tenantid`, `x-groupid`, `x-namespace`, `x-group`, and optionally `x-host`). The tenant ID in the route and header must agree when both are supplied.
-
-### NATS Intake — Machine Holder
-
-A machine agent submits an OID4VP authorization URL through a NATS CloudEvent, using the event type `verifier.presentation.authorization.remote` on the `presentation.authorisation` subject. The request is validated and stored with `consentMode=auto`.
-
-The transport does not inherently determine consent: a trusted caller explicitly assigns `manual` or `auto` at intake. Both transports use the same request-processing core.
-
-## 2. Presentation Request Storage
-
-Validated requests are stored in Cassandra, isolated by `tenantId` and `groupId`.
-
-| Field | Description |
-|---|---|
-| `presentationId` | Internal request identifier |
-| `tenantId` | Tenant identifier |
-| `groupId` | Holder account identifier |
-| `namespace` | Cryptographic key namespace |
-| `group` | Cryptographic key group |
-| `consentMode` | Immutable `manual` or `auto` |
-| `status` | Processing status |
-| `dcqlQuery` | Requested credentials and claims |
-| `clientId` | Verified verifier identifier |
-| `expiresAt` | Request expiration time |
-
-Supported statuses: `pending`, `processing`, `completed`, `rejected`, `failed`, and `blocked`.
-
-Rejected requests are **not deleted immediately**. They are marked `rejected` and removed from the pending inbox. Cassandra TTL handles eventual removal. Status changes must preserve the remaining TTL.
-
-## 3. Manual Consent — Human Holder
-
-Requests with `consentMode=manual` appear in the Web Wallet's presentation inbox, scoped to the current `tenantId` and `groupId`.
-
-The holder can:
-
-1. View pending presentation requests and the verifier identity.
-2. Inspect DCQL requirements and matching credential candidates.
-3. Select credentials and permitted claim disclosures.
-4. Approve or reject a request.
-5. Block unwanted verifiers.
-
-**Approve:** The wallet submits a `PresentationSelection`. The service validates it against the stored request before fulfillment.
-
-**Reject:** The service atomically changes the status to `rejected`. The request disappears from the pending inbox and cannot subsequently be approved.
-
-## 4. Automatic Consent — Machine Holder
-
-Requests with `consentMode=auto` are evaluated without human interaction:
-
-1. Retrieve matching credentials from Credential Storage.
-2. Send the original DCQL query, matching credential IDs, and holder/verifier context to the external Policy Client.
-3. Receive an approved `PresentationSelection` or a denial.
-4. Validate the returned selection against the original DCQL query and holder scope.
-5. Fulfill approved requests; mark denied requests as `rejected`.
-
-The **Policy Client decides consent**. The Holder Service does not implement a separate policy engine.
-
-Flow: 
-```mermaid
-sequenceDiagram
-    autonumber
-
-    participant H as Holder / AutoConsent
-    participant C as Credential Resolver
-    participant P as Credential Selection Policy
-    participant DB as Cassandra
-    participant F as Fulfillment Service
-
-    H->>H: Check consentMode == auto
-    H->>H: Check CredentialSelectionPolicy configured
-
-    H->>C: resolveCredentials(ctx, cfg, row)
-    C-->>H: Credential groups with queryId and credentialId
-
-    H->>H: Build CredentialSelection[]
-
-    Note over H,P: Policy Input
-
-    H->>P: POST CredentialSelectionPolicy
-    Note right of H: {<br/>tenantId,<br/>groupId,<br/>clientId,<br/>dcqlQuery,<br/>credentials: [<br/>  {queryId, credentialId}<br/>]<br/>}
-
-    P->>P: Evaluate credential selection rules
-
-    alt Policy denies
-        P-->>H: {"approved": false}
-        H->>DB: TransitionPresentation(pending → rejected)
-        DB-->>H: changed / error
-        H-->>H: Return nil if transition succeeded
-
-    else Policy approves
-        P-->>H: {"approved": true, "selections": [...]}
-
-        H->>H: Decode PresentationSelection
-
-        alt No selections returned
-            H-->>H: Error: policy approved without a selection
-        else Valid selections
-            H->>F: FulfillSelected(ctx, cfg, row, sign, selection)
-            F-->>H: nil / error
-        end
-
-    else Invalid policy response
-        P-->>H: Missing or invalid approved
-        H-->>H: Error: policy response missing approved boolean
-    end
-```
-
-Policy Input: 
-
-```json
-{
-  "tenantId": "demo-tenant",
-  "groupId": "demo-group",
-  "clientId": "https://verifier.example.org",
-  "dcqlQuery": {
-    "credentials": [
-      {
-        "id": "identity",
-        "format": "dc+sd-jwt"
-      }
-    ]
-  },
-  "credentials": [
-    {
-      "queryId": "identity",
-      "credentialId": "credential-123"
-    },
-    {
-      "queryId": "identity",
-      "credentialId": "credential-456"
-    }
-  ]
-}
-```
-
-Policy Output with Approve: 
-```json
-{
-  "approved": true,
-  "selections": [
-    {
-      "queryId": "identity",
-      "credentialId": "credential-123"
-    }
-  ]
-}
-```
-
-Policy Output without Approve:
-
-```json
-{
-  "approved": false
-}
-```
-
-
-## 5. PresentationSelection
-
-Both consent modes produce the same structure:
-
-```json
-{
-  "presentationId": "presentation-123",
-  "approved": true,
-  "selections": [
-    {
-      "queryId": "identity",
-      "credentialId": "credential-123",
-      "claimIds": ["given_name", "family_name"]
-    }
-  ]
-}
-```
-
-| Field | Description |
-|---|---|
-| `presentationId` | Stored authorization request |
-| `approved` | Consent decision |
-| `queryId` | DCQL credential query identifier |
-| `credentialId` | Selected credential from storage |
-| `claimIds` | Selected DCQL claim identifiers, when applicable |
-
-Selections must satisfy DCQL credential queries, `credential_sets`, claim constraints, and `claim_sets`. The service must not silently disclose claims that were not selected.
-
-## 6. Shared Presentation Fulfillment
-
-```text
-PresentationSelection
-        |
-        v
-Load Stored Authorization Request
-        |
-        v
-Validate Selection against DCQL
-        |
-        v
-Load Selected Credentials
-        |
-        v
-Generate VP Token / Required Proofs
-        |
-        v
-Build OID4VP Authorization Response
-        |
-        v
-Send Response to Verifier
-```
-
-The service constructs the response according to the authorization request, including `direct_post` and, where applicable, encrypted `direct_post.jwt`. DCQL-based OID4VP responses use `vp_token` rather than `presentation_submission`.
-
-## 7. Holder Context and Isolation
-
-| Parameter | Purpose | HTTP source |
-|---|---|---|
-| `tenantId` | Tenant isolation | `/v1/{tenantId}` and `x-tenantid` |
-| `groupId` | Holder account isolation | `x-groupid` |
-| `namespace` | Crypto Provider key namespace | `x-namespace` |
-| `group` | Crypto Provider key group | `x-group` |
-| `host` | Original host, where needed | `x-host` |
-
-The context is supplied by trusted XFSC infrastructure. The Holder Service does **not** implement its own authentication or account management. The gateway must overwrite untrusted client-provided context headers, and direct public access to the service must be restricted. NATS publishers must likewise be authorized to assert their supplied context.
-
-The complete context is persisted at intake and reused for fulfillment. `groupId` (holder account) and `group` (key group) are distinct values.
-
-## 8. Security and Lifecycle Rules
-
-- Consent mode and holder context are immutable after intake.
-- Manual requests are decided through the Web Wallet; automatic requests through the Policy Client.
-- Credential selections must satisfy the stored DCQL request and holder ownership constraints.
-- Presentation requests are fulfilled at most once, using atomic status transitions.
-- Rejected and blocked requests cannot later be approved.
-- Blocking a verifier prevents new actionable requests and closes pending ones in the same holder scope.
-- Expiration is enforced from the authorization request and stored `expiresAt`; Cassandra TTL handles retention.
-- Cryptographic proof generation uses the stored `namespace` and `group` rather than assuming they equal `tenantId` and `groupId`.
-
-## 9. Design Principles
-
-**Transport independence:** HTTP and NATS share one request-processing core.
-
-**Consent separation:** The Web Wallet manages human consent; the external Policy Client decides machine consent.
-
-**Immutable context:** Consent mode and holder context are fixed at request creation.
-
-**Shared fulfillment:** Both approved flows use the same DCQL validation, credential loading, proof generation, and OID4VP response pipeline.
-
-
----
-
-# End-to-end OID4VP operator guide (manual and machine consent)
-
-This section documents the **actual routes and JSON fields in this revision**. All examples assume a trusted gateway has authenticated the caller and supplied the required holder context. Replace the example hosts, tenant, account and key identifiers.
-
-## A. Verifier: create a VP authorization and obtain a wallet link
-
-### A1. NATS verifier request/reply (recommended for service-to-service integrations)
-
-Configure the verifier's `presentationRequest` NATS subject. Publish a CloudEvent with type `verifier.presentation.authorization` and the following `data` object (the transport uses the configured subject, not necessarily the event type as the subject):
-
-```json
-{
-  "specversion": "1.0",
-  "id": "request-event-1",
-  "source": "vp-integration",
-  "type": "verifier.presentation.authorization",
-  "datacontenttype": "application/json",
-  "data": {
-    "tenantId": "demo-tenant",
-    "groupId": "demo-account",
-    "requestId": "vp-demo-001",
-    "dcql_query": {
-      "credentials": [{
-        "id": "identity",
-        "format": "dc+sd-jwt",
-        "meta": {"vct_values": ["https://issuer.example/types/identity"]},
-        "claims": [{"path": ["test"]}]
-      }]
-    },
-    "client_id": "decentralized_identifier:did:web:verifier.example",
-    "ttl": 3600,
-    "tenant_uri": "verifier.example",
-    "target_uri": "wallet.example",
-    "requestobject_uri": "verifier.example"
-  }
-}
-```
-
-Use a NATS **request/reply** client. The reply event data contains `presentation_id` (opaque state) and `request_uri` (complete authorization URL). Forward the **complete** `request_uri` string to the wallet/holder; do not construct it from the opaque state yourself. The verifier serves the signed Request Object at `/presentation/proof/{state}/request-object/request.jwt`, and receives `direct_post` at `/presentation/proof/{state}` (with the gateway's configured version/tenant prefix).
-
-**Important:** `client_id` must resolve to the verifier's actual DID signing identity; `target_uri` is the wallet host and `requestobject_uri` the externally reachable verifier host. The Request Object endpoint in this version advertises `response_mode=direct_post` (not `direct_post.jwt`). For `ldp_vc`, replace the DCQL format and credential constraints with an LDP VC query supported by the deployed DCQL library.
-
-### A2. HTTP verifier request creation (alternative)
-
-The existing `GET /presentation/request` endpoint accepts the DCQL query as **base64url without padding** in `dcqlQuery`, plus `requestId` query parameter and `x-tenantId`, `x-groupId`, `x-client-id` (or `x-did`) and optional `x-ttl` headers. It creates the verifier transaction and returns a signed Request Object. The NATS method above is preferable when you need the complete authorization URL and presentation ID in one response.
-
-## B. Manual holder: resolve a received VP link and approve it
-
-**Step 1 — Submit the complete OID4VP link** returned by the verifier or received via QR code. The holder fetches `request_uri`, validates the Request Object, stores the DCQL snapshot, and creates a pending manual transaction:
-
-```bash
-BASE="https://holder.example/v1/tenants/demo-tenant/api/presentation"
-AUTH_URL='openid4vp://authorize?client_id=decentralized_identifier%3Adid%3Aweb%3Averifier.example&request_uri=https%3A%2F%2Fverifier.example%2Fpresentation%2Fproof%2FSTATE%2Frequest-object%2Frequest.jwt'
-
-curl -fsS -X POST "$BASE/presentations" \
-  -H 'Content-Type: application/json' \
-  -H 'x-tenantid: demo-tenant' \
-  -H 'x-groupid: demo-account' \
-  -H 'x-namespace: crypto-namespace' \
-  -H 'x-group: crypto-group' \
-  --data "$(jq -n --arg url "$AUTH_URL" '{url:$url,consentMode:"manual",ttl:3600}')"
-```
-
-Response: `201 {"presentationId":"<opaque-state>","status":"pending"}`. Keep this `presentationId` unchanged.
-
-**Step 2 — List pending requests** (same headers):
-
-```bash
-curl -fsS "$BASE/presentations" \
-  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
-  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group'
-```
-
-**Step 3 — Inspect one request and matching credentials**:
-
-```bash
-PID='<presentationId-from-step-1>'
-curl -fsS "$BASE/presentations/$PID" \
-  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
-  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group'
-curl -fsS "$BASE/presentations/$PID/candidates" \
-  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
-  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group'
-```
-
-The candidates response contains `dcqlQuery` and `candidates`. Select **actual** `queryId` and `credentialId` values from that response; do not invent credential IDs.
-
-**Step 4 — Approve and transmit**:
-
-```bash
-curl -fsS -X POST "$BASE/presentations/$PID/approve" \
-  -H 'Content-Type: application/json' \
-  -H 'x-tenantid: demo-tenant' -H 'x-groupid: demo-account' \
-  -H 'x-namespace: crypto-namespace' -H 'x-group: crypto-group' \
-  -d '{
-    "holderDid":"did:web:holder.example",
-    "signKey":"holder-key",
-    "selections":[{
-      "queryId":"identity",
-      "credentialId":"ACTUAL_CREDENTIAL_ID_FROM_CANDIDATES",
-      "disclosures":["test"]
-    }]
-  }'
-```
-
-For **SD-JWT**, `disclosures` contains the selected top-level claim names (for example `test`), which the signer maps to its disclosure frame. Required DCQL claims must actually be disclosed. For **LDP VC**, omit `disclosures`; the selected credential is embedded in the JSON-LD Verifiable Presentation and signed by the crypto-provider. `claimIds` is currently **not** supported and is rejected; do not send it.
-
-Response on success: `200 {"status":"completed"}`. The service signs and sends the VP to the verifier's `response_uri`; **do not POST the VP manually after approval**. To reject instead, `POST "$BASE/presentations/$PID/reject"` with the same gateway headers (returns HTTP 204).
-
-## C. Machine holder: resolve the same VP link with automatic consent
-
-Set `externalPresentation.credentialSelectionPolicy` to your reachable policy HTTP endpoint. Send a NATS request to the holder's configured `authorization` subject. The CloudEvent **type** is `verifier.presentation.authorization.remote`; the **data** must contain:
-
-```json
-{
-  "specversion": "1.0",
-  "id": "machine-request-event-1",
-  "source": "vp-machine-client",
-  "type": "verifier.presentation.authorization.remote",
-  "datacontenttype": "application/json",
-  "data": {
-    "tenantId": "demo-tenant",
-    "groupId": "demo-account",
-    "requestId": "machine-vp-001",
-    "url": "openid4vp://authorize?client_id=decentralized_identifier%3Adid%3Aweb%3Averifier.example&request_uri=https%3A%2F%2Fverifier.example%2Fpresentation%2Fproof%2FSTATE%2Frequest-object%2Frequest.jwt",
-    "consentMode": "auto",
-    "ttl": 3600,
-    "did": "did:web:holder.example",
-    "key": "holder-key",
-    "namespace": "crypto-namespace",
-    "group": "crypto-group"
-  }
-}
-```
-
-The holder resolves the Request Object, retrieves credential candidates and POSTs to the configured policy endpoint:
-
-```json
-{
-  "tenantId":"demo-tenant",
-  "groupId":"demo-account",
-  "clientId":"decentralized_identifier:did:web:verifier.example",
-  "dcqlQuery":{"credentials":[{"id":"identity","format":"dc+sd-jwt","claims":[{"path":["test"]}]}]},
-  "credentials":[{"queryId":"identity","credentialId":"ACTUAL_CREDENTIAL_ID"}]
-}
-```
-
-The policy must return an explicit decision and a credential selection. For an SD-JWT claim `test`:
-
-```json
-{
-  "approved":true,
-  "selections":[{
-    "queryId":"identity",
-    "credentialId":"ACTUAL_CREDENTIAL_ID",
-    "disclosures":["test"]
-  }]
-}
-```
-
-For LDP VC omit `disclosures`. To deny return `{"approved":false}`. A positive decision without selections is rejected. The NATS reply CloudEvent data contains `presentation_id`, `status` (`completed`, `pending`, or `failed`) and optional `error`. The machine holder sends the VP to the verifier automatically after approval; no manual `/approve` call is needed.
-
-## D. Response modes, verifier requirements and deployment notes
-
-- Holder **outgoing** responses support `direct_post` and encrypted `direct_post.jwt` for both SD-JWT and LDP VC, depending on the incoming Request Object. For encrypted responses, the verifier must supply a compatible ECDH-ES P-256 JWK and encryption metadata.
-- This service's own **incoming verifier** endpoint currently advertises and accepts `direct_post` only. Incoming `direct_post.jwt` requires provisioning and publishing a verifier encryption keypair and implementing JWE decryption; it is intentionally rejected rather than silently treated as a missing token.
-- The verifier cryptographically validates both formats using `SignerService.PresentationVerifyUrl`; for SD-JWT it also validates the disclosed credential against DCQL. If the crypto-provider does not return `disclosedCredential`, the verifier reconstructs top-level disclosures from the already-verified compact SD-JWT and checks their digests. Nested disclosure matching is not supported by this fallback.
-- Ensure the crypto-provider verifies issuer signatures, SD-JWT `sd_hash`, KB-JWT signature and holder binding, expected `nonce` and `aud`. A successful HTTP 200 alone is **not** sufficient; it must return `{"valid":true}` and perform those checks.
-- The trusted gateway must authenticate and authorize the holder headers. The service does not treat caller-supplied headers as proof of identity.
-- Legacy `POST /internal/proofs/proof/{state}/fulfill` has been **removed**. Migrate callers to the manual Holder API or the machine NATS request/reply flow.
-
-## Verifier-End-to-End-Test: HTTP und NATS
-
-Die folgenden Skripte liegen in `scripts/verifier-*.sh`. Voraussetzungen: `curl`, `jq`, `python3`; für NATS zusätzlich die `nats` CLI. Der Verifier benötigt Cassandra, einen erreichbaren Signer und Crypto-Provider sowie `stateSigningKey` und `externalPresentation.enabled: true`. Die Beispiele verwenden den Tenant-Router `/v1/tenants/{tenantId}`; ggf. vorgeschaltete Gateways müssen entsprechend routen.
-
-### DCQL vorbereiten
-
-Beispiel für SD-JWT (`dcql.json`):
-
-```json
-{"credentials":[{"id":"example-query","format":"dc+sd-jwt","meta":{"vct_values":["https://example.org/credential"]},"claims":[{"path":["test"]}]}]}
-```
-
-Für LDP VC muss `format` auf `ldp_vc` gesetzt und die DCQL-Query auf die tatsächlich verfügbaren Credentials abgestimmt werden. Verwende die vom Verifier und der OID4VP-Library unterstützten DCQL-Felder.
-
-### HTTP: Authorization-Link erzeugen
-
-```bash
-export API_BASE=http://127.0.0.1:8080
-export PUBLIC_BASE=https://verifier.example/v1/tenants/demo-tenant
-export TENANT_ID=demo-tenant GROUP_ID=test
-export CLIENT_ID='decentralized_identifier:did:web:verifier.example'
-export SIGN_KEY=verifier-key
-./scripts/verifier-http-create.sh dcql.json
-cat verifier-output/oid4vp-link.txt
-cat verifier-output/presentation_id.txt
-```
-
-Der HTTP-Endpunkt `GET /v1/tenants/{tenantId}/presentation/request?requestId=...&dcqlQuery=...` erstellt eine Transaktion, signiert das Request Object und liefert das JWT. Das Skript dekodiert dessen `state` **ohne die Signatur zu verifizieren** (nur zur URL-Konstruktion) und baut einen Link mit `client_id` und `request_uri`. Das Request Object ist abrufbar über `GET /v1/tenants/{tenantId}/presentation/proof/{state}/request-object/request.jwt`. `PUBLIC_BASE` muss öffentlich per HTTPS erreichbar sein; es darf nicht auf localhost zeigen, wenn ein externer Holder die Anfrage verarbeiten soll. Der Signer benötigt einen gültigen `SIGN_KEY` und die passende Namespace-Konfiguration.
-
-**Wichtig:** Der vorhandene `JwtResponse`-Handler setzt beim ersten Abruf bereits den Status `request_object_fetched`. Falls ein späterer Abruf durch den Holder abgelehnt wird, muss dieser Handler separat auf idempotente Abrufe angepasst werden. Der HTTP-Create-Aufruf liefert außerdem ein signiertes Request Object, während der erzeugte Link auf den separaten Request-Object-Endpunkt verweist.
-
-### HTTP: Präsentation empfangen und abrufen
-
-Die VP wird **nicht** vom Skript angenommen, sondern durch den bereits vorhandenen Verifier-Endpoint `POST /v1/tenants/{tenantId}/presentation/proof/{state}` (`application/x-www-form-urlencoded` mit `state` und `vp_token`). Das Holder-Skript oder eine Wallet sendet sie an die `response_uri` im signierten Request Object. Der Verifier validiert DCQL und die kryptografischen Proofs, speichert den VP-Token in seiner Cassandra-Tabelle und veröffentlicht einen Storage-Event.
-
-Interne Route: `GET /v1/tenants/{tenantId}/internal/presentations/{state}`. Sie gibt nur bei `presentation_received` und vorhandener VP eine JSON-Antwort mit `presentationId`, `requestId`, `groupId`, `status`, `presentation` zurück; sonst HTTP 409 (noch nicht verfügbar) bzw. 404 (unbekannt).
-
-```bash
-STATE="$(cat verifier-output/presentation_id.txt)"
-./scripts/verifier-http-get.sh "$STATE"
-./scripts/verifier-http-wait.sh "$STATE" verified-presentation.json
-```
-
-`verifier-http-list.sh` listet ausschließlich verifizierte Präsentationen (Metadaten ohne VP-Payload) der über `TENANT_ID` und `GROUP_ID` ausgewählten Gruppe. Die HTTP-Get-/Wait-Skripte verwenden ebenfalls die internen Routen und benötigen `GROUP_ID`. `verifier-http-wait.sh` fragt standardmäßig bis zu 60-mal im Abstand von 2 Sekunden ab (`ATTEMPTS`, `INTERVAL`).
-
-### NATS: Authorization-Link erzeugen
-
-```bash
-#!/usr/bin/env bash
-
-# NATS
-export NATS_URL='nats://127.0.0.1:4222'
-export NATS_SUBJECT='request'
-export NATS_TIMEOUT='30s'
-
-# Tenant
-export TENANT_ID='demo-tenant'
-export GROUP_ID='test'
-
-# Verifier-Identität
-# Muss durch die tatsächlich konfigurierte Verifier-DID ersetzt werden.
-export CLIENT_ID='decentralized_identifier:did:web:verifier.example'
-
-# Öffentlich erreichbarer Gateway-Host
-export PUBLIC_HOST='verifier.example'
-
-# Basisadressen für den XFSC Requestor
-export TARGET_URI="${PUBLIC_HOST}/api/verifier/presentation"
-export REQUESTOBJECT_URI="${PUBLIC_HOST}/api/verifier/presentation/proof"
-
-# Authorization-Gültigkeit: 5 Minuten
-export TTL=300
-
-# Authorization mit vordefinierter Presentation Policy erzeugen
-./scripts/verifier-nats-create.sh paradym-test
-```
-
-Der NATS-Request ist ein CloudEvent `verifier.presentation.authorization` mit `data.tenant_id`, `data.group_id`, `data.request_id`, `data.dcql_query`, `data.client_id`, `data.ttl`, `data.target_uri` und `data.requestobject_uri`. Die Antwort enthält `presentation_id` (HMAC-State) und `request_uri` (OID4VP-Link). **Achtung:** Die bestehende `buildUri`-Funktion nutzt `url.URL{Host: ...}`; Host-Felder mit Pfad sind in Go keine gültigen Hosts. Für öffentlich verwendbare Links ist die URL-Erzeugung im NATS-Pfad daher noch auf getrennte Host-/Pfad-Konfiguration umzustellen. Bis dahin die zurückgelieferte `request_uri` vor dem Wallet-Aufruf kontrollieren.
-
-### NATS: Empfangsstatus und verifizierte Präsentation
-
-```bash
-./scripts/verifier-nats-watch.sh
-./scripts/verifier-nats-get.sh "$STATE" verified-nats.json
-```
-
-`verifier-nats-watch.sh` lauscht auf `topics.proofNotify` (`presentation.proof.notify` im Beispiel). Neue NATS-Request-Art `verifier.presentation.result.get` auf `topics.presentationRequest` mit `{tenant_id,presentation_id}`; Reply-Art `verifier.presentation.result.reply` mit `status`, `presentation` oder `error`. Der NATS-Retrieve-Handler liest die **lokal persistierte, verifizierte** Präsentation, nicht das externe Credential-Storage-Service. Die bestehende Veröffentlichung an das Credential-Storage-Service erfolgt weiterhin über `topics.storageRequest` und `storageMessaging.StorePresentationType`.
-
-**Sicherheit:** Die HTTP-Retrieval-Route prüft den signierten State, besitzt aber in dieser Änderung **keine zusätzliche Autorisierung auf Tenant-/Group-Ebene**. Der NATS-Result-Handler setzt voraus, dass der NATS-Subject über Broker-ACLs geschützt ist. Beide Retrieval-Endpunkte müssen vor öffentlicher Freigabe an eure AuthN/AuthZ-Policy gebunden werden. `direct_post.jwt`-Empfang ist weiterhin nicht implementiert; dieser Verifier verwendet `direct_post`.
-
-
-### Interne und externe Verifier-Schnittstellen (Routing-Trennung)
-
-- **Extern:** `GET /presentation/request` (Request-Erzeugung, derzeit konfigurationsabhängig), `GET /presentation/proof/{state}/request-object/request.jwt` (Wallet Request-Object Fetch), `POST /presentation/proof/{state}` (OID4VP `direct_post` Response). Diese Endpunkte müssen für Wallets erreichbar sein, sofern der entsprechende Flow aktiviert ist.
-- **Intern:** `GET /internal/presentations` (nur erfolgreich verifizierte Einträge als Metadaten), `GET /internal/presentations/{state}` (verifizierte VP). Beide Endpunkte sind relativ zum vom Server bereitgestellten Tenant-Prefix `/v1/tenants/{tenantId}`. `x-groupid` ist verpflichtend und muss mit der gespeicherten Gruppe übereinstimmen.
-- **Bereits vorhandene interne Legacy-API:** `/internal/list/proofs/{groupId}` listet vollständige Transaktionsdatensätze und ist **nicht** als öffentliche API gedacht. Für neue Clients die datensparsame `/internal/presentations`-Route verwenden.
-- **NATS (intern):** `verifier.presentation.authorization` erstellt Requests; `verifier.presentation.result.get` holt eine VP mit `tenant_id`, `group_id` und `presentation_id`; Notifications über `presentation.proof.notify` enthalten keine VP-Payload. NATS-Zugriff muss über Broker-ACLs auf vertrauenswürdige Services beschränkt werden.
-
-Beispiele:
-
-```bash
-export API_BASE=http://127.0.0.1:8080
-export TENANT_ID=demo-tenant
-export GROUP_ID=test
-./scripts/verifier-http-list.sh
-./scripts/verifier-http-get.sh "$(cat verifier-output/presentation_id.txt)"
-./scripts/verifier-nats-get.sh "$(cat verifier-output/presentation_id.txt)"
-```
-
-**Sicherheitsgrenze:** Die Trennung der Router-Gruppen ist eine strukturelle Trennung, keine eigenständige Authentifizierung. Der Gateway/Ingress muss `/internal/**` sperren und den Tenant-/Gruppenkontext aus einer vertrauenswürdigen Identität setzen; frei wählbare `x-groupid`-Header reichen für Produktionszugriff nicht aus. Die NATS-Subjects müssen separat per ACL geschützt werden. Der HTTP-Create-Test (`verifier-http-create.sh`) verwendet derzeit den externen `/presentation/request`-Endpoint und sollte bei einem späteren produktiven Design auf einen internen Create-Endpoint umgestellt werden.
-
-
-## Presentation Policies (Policy-ID statt DCQL-Datei)
-
-Siehe [scripts/README-policy.md](scripts/README-policy.md) für Konfiguration, Test-Policy-Service, HTTP-/NATS-Aufrufe und bekannte Einschränkungen.
-
-### Demo Presentation Policy Service (Docker)
-
-Die bisherigen `test-policy-service/`-Fixtures liegen jetzt unter [`deployment/docker/demo-presentation-policy-service/`](deployment/docker/demo-presentation-policy-service/). Der Ordner enthält `Dockerfile`, `compose.yaml`, `server.py`, `policies/` und eine eigene [README](deployment/docker/demo-presentation-policy-service/README.md).
-
-```bash
-cd deployment/docker
-docker compose up -d --build
-curl -fsS 'http://127.0.0.1:8099/v1/presentation-policies/paradym-test?tenantId=demo-tenant&groupId=test' | jq .
-```
-
-Im globalen Compose wird `presentation-policy` automatisch gebaut und als gesunde Abhängigkeit des Verifiers gestartet. Die Verifier-Konfiguration verwendet `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_URL=http://presentation-policy:8080` und `CREDENTIALVERIFICATION_PRESENTATIONPOLICY_TIMEOUTSECONDS=10`; der Request-Object-Schlüssel wird über `VERIFICATION_REQUEST_OBJECT_SIGN_KEY` konfiguriert (Default nur für lokale Tests). Der Test-Service ist am Host ausschließlich über `127.0.0.1:8099` erreichbar. **Nicht öffentlich freigeben:** Tenant/Group werden nur auf Vorhandensein geprüft.
-
-### Verifier client ID
-
-The internal HTTP authorization endpoint requires the trusted tenant-gateway header `X-DID` and constructs `client_id` as `decentralized_identifier:<X-DID>`. `clientId` in the HTTP body and the former `clientIdPolicy` setting are no longer used. For NATS, the event has no HTTP headers: the CLI script derives the same client ID from the required `DID` environment variable; producers must provide a tenant-verified DID.
+End-to-end validation should cover:
+
+- Profile resolution by tenant, group, role and interaction type.
+- Signed Request Object generation and verification, including `client_id`/`kid` binding.
+- SD-JWT and LDP VC verification against persisted DCQL; positive and negative disclosure cases.
+- Manual and automatic consent, rejection, blocked verifiers and concurrent approvals.
+- `direct_post` and holder outgoing `direct_post.jwt` with valid and invalid encryption metadata.
+- Storage DIRECT-mode retrieval and NATS event publication, including mandatory CloudEvent attributes.
+- Tenant/group isolation, URL/redirect/SSRF restrictions, expiration and Cassandra TTL behavior.
+
+The original documentation calls for a complete Go build, signer integration tests, Cassandra migration tests and end-to-end tests against a trusted external verifier before production rollout. See [Operator guide](docs/OPERATOR_GUIDE.md) for practical steps.
+
+## Known limitations and migration notes
+
+- **Profiles replace the legacy presentation-policy lookup.** A separate credential-selection Policy Client can still be used for machine consent.
+- **Removed endpoint:** `/internal/proofs/proof/{state}/fulfill`. Use the Holder API or NATS machine intake.
+- **Selection schema:** Current examples use `disclosures`; older `claimIds` examples are deprecated.
+- **Verifier inbound `direct_post.jwt`:** Not implemented in the supplied revision; holder outgoing support is distinct.
+- **DID verifier identities:** Supported by the documented Request Object verification path; other client identifier methods need explicit implementations.
+- **Route prefixes:** Verify gateway routing; older documents inconsistently use `/v1/{tenantId}` and `/v1/tenants/{tenantId}`.
+- **NATS URI construction:** The original operator guide warns that a host field containing a path can generate invalid URLs. Validate returned authorization URLs.
+- **Legacy scripts and documentation:** Old `presentation_definition`, `/fulfill` and external presentation-policy examples should not be reused without migration.
